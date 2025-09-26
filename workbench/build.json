@@ -1,0 +1,8 @@
+{
+  "js/workbench.bundle.js": [
+    "public/js/workbench.js"
+  ],
+  "css/workbench.bundle.css": [
+    "public/css/workbench.css"
+  ]
+}

@@ -1,0 +1,220 @@
+/* ../../../../../../../var/folders/y5/g5m_81z95ys4s50yc7mpx7r80000gn/T/tmp-89327-cvC3cwYPgRqi/workbench/workbench/public/css/workbench.bundle.css */
+:root {
+  --bg: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --card: #ffffff;
+  --sidebar-bg: #f8fafc;
+  --accent: #6366f1;
+  --accent-ghost: #eef2ff;
+}
+:root.theme-dark {
+  --bg:#0b0c10;
+  --card:#121317;
+  --sidebar-bg:#0e1118;
+  --muted:#9aa3af;
+  --text:#e5e7eb;
+  --accent:#6366f1;
+  --accent-ghost:#202338;
+  --border:#1f2230;
+}
+html,
+body {
+  height: 100%;
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+#wb-app {
+  display: flex;
+  height: calc(100vh - 60px);
+}
+.wb-sidebar {
+  width: 300px;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+.wb-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.wb-logo {
+  font-weight: 700;
+  letter-spacing: .2px;
+}
+.wb-btn {
+  background: #fff;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.wb-btn:hover {
+  box-shadow: 0 1px 0 rgba(0, 0, 0, .05);
+}
+.wb-btn.danger {
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #b91c1c;
+}
+.wb-btn.ghost {
+  background: var(--accent-ghost);
+  border-color: transparent;
+}
+.wb-iconbtn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.wb-search {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.wb-search input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+}
+.wb-page-list {
+  overflow: auto;
+  padding: 8px;
+}
+.wb-page-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.wb-page-item:hover {
+  background: #f3f4f6;
+}
+:root.theme-dark .wb-page-item:hover {
+  background: #171a26;
+}
+.wb-page-item.active {
+  background: #eef2ff;
+  border: 1px solid #e0e7ff;
+}
+:root.theme-dark .wb-page-item.active {
+  background: #171a26;
+  border-color: #2b3050;
+}
+.wb-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+}
+.wb-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--card);
+  z-index: 5;
+}
+.wb-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+}
+.wb-badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+}
+.wb-page-title-row {
+  padding: 12px 18px 0;
+}
+.wb-title {
+  font-size: 32px;
+  font-weight: 700;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  outline: none;
+  width: 100%;
+  letter-spacing: -0.01em;
+}
+.wb-editor {
+  padding: 12px 18px 120px;
+  max-width: 900px;
+}
+.wb-block {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+}
+.wb-gutter {
+  width: 32px;
+  display: flex;
+  gap: 6px;
+  visibility: hidden;
+}
+.wb-block:hover .wb-gutter {
+  visibility: visible;
+}
+.wb-handle,
+.wb-plus {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: grab;
+}
+.wb-plus {
+  cursor: pointer;
+}
+.wb-content [contenteditable=true] {
+  min-height: 1.6em;
+  outline: none;
+}
+.wb-content p,
+.wb-content li {
+  line-height: 1.7;
+}
+.wb-h1 {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 12px 0;
+}
+.wb-h2 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 10px 0;
+}
+.wb-ul,
+.wb-ol {
+  padding-left: 22px;
+}
+.wb-checkbox {
+  margin-right: 8px;
+}
+.wb-empty-hint {
+  color: var(--muted);
+  opacity: .8;
+}
+/*# sourceMappingURL=workbench.bundle.4EWI34IP.css.map */

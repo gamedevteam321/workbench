@@ -1,0 +1,1905 @@
+{% extends "templates/web.html" %}
+{% block title %}Workbench{% endblock %}
+
+{% block head_include %}
+<link rel="stylesheet" href="/assets/workbench/css/workbench.bundle.css">
+<script>
+console.log('HTML template loaded');
+</script>
+{% endblock %}
+
+{% block page_content %}
+<div id="wb-app">
+  <aside class="wb-sidebar">
+    <div class="wb-topbar">
+      <div class="wb-logo">Workbench</div>
+      <div class="wb-topbar-actions">
+        <button id="wb-new-workspace" class="wb-btn ghost" title="New Workspace">+</button>
+        <button id="wb-new-page" class="wb-btn">+ New</button>
+      </div>
+    </div>
+    
+    <div class="wb-sidebar-content">
+      <div class="wb-section">
+        <div class="wb-section-header">
+          <span class="wb-section-title">Private</span>
+        </div>
+        <div class="wb-section-content">
+          <div class="wb-new-page-item">
+            <span class="wb-new-page-icon">📄</span>
+            <span class="wb-new-page-text">New page</span>
+          </div>
+          <div id="wb-private-pages" class="wb-page-list"></div>
+        </div>
+      </div>
+      
+      <div class="wb-section">
+        <div class="wb-section-header">
+          <span class="wb-section-title">Workspaces</span>
+        </div>
+        <div class="wb-section-content">
+          <div id="wb-workspaces" class="wb-workspace-list"></div>
+          <div class="wb-add-workspace-item">
+            <span class="wb-add-workspace-icon">+</span>
+            <span class="wb-add-workspace-text">Add new</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="wb-search">
+      <input id="wb-search" placeholder="Search pages…" />
+    </div>
+  </aside>
+
+  <main class="wb-main">
+    <div class="wb-page-header">
+      <div class="wb-breadcrumbs">
+        <button id="wb-back" class="wb-iconbtn" title="Back">←</button>
+        <span id="wb-crumb-title">New page</span>
+        <span class="wb-badge">Private</span>
+      </div>
+      <div class="wb-actions">
+        <button id="wb-theme" class="wb-btn ghost" title="Toggle theme">☼</button>
+        <button id="wb-delete" class="wb-btn danger">Delete</button>
+      </div>
+    </div>
+
+    <div class="wb-page-title-row">
+      <input id="wb-title" class="wb-title" placeholder="Untitled" />
+    </div>
+
+    <div id="wb-editor" class="wb-editor" spellcheck="true"></div>
+  </main>
+</div>
+
+<script>
+console.log('Starting Notion-style workbench...');
+
+// Notion-style block editor
+function createNotionWorkbench() {
+  console.log('Creating Notion-style workbench...');
+  
+  const editor = document.getElementById('wb-editor');
+  if (!editor) {
+    console.error('Editor element not found');
+    return;
+  }
+  
+  // Clear any existing content
+  editor.innerHTML = '';
+  
+      // Block types
+      const blockTypes = {
+        paragraph: { icon: '📝', name: 'Text', create: () => createBlock('paragraph') },
+        heading1: { icon: '📋', name: 'Heading 1', create: () => createBlock('heading1') },
+        heading2: { icon: '📋', name: 'Heading 2', create: () => createBlock('heading2') },
+        heading3: { icon: '📋', name: 'Heading 3', create: () => createBlock('heading3') },
+        bulleted: { icon: '•', name: 'Bulleted list', create: () => createBlock('bulleted') },
+        numbered: { icon: '1.', name: 'Numbered list', create: () => createBlock('numbered') },
+        checklist: { icon: '☐', name: 'To-do list', create: () => createBlock('checklist') },
+        toggle: { icon: '🔽', name: 'Toggle', create: () => createBlock('toggle') },
+        image: { icon: '🖼️', name: 'Image', create: () => createBlock('image') },
+        file: { icon: '📎', name: 'File', create: () => createBlock('file') },
+        code: { icon: '💻', name: 'Code', create: () => createBlock('code') },
+        quote: { icon: '💬', name: 'Quote', create: () => createBlock('quote') },
+        divider: { icon: '➖', name: 'Divider', create: () => createBlock('divider') }
+      };
+  
+      // Get the position of a numbered list item in the sequence
+      function getNumberedListPosition(currentBlock) {
+        let position = 1;
+        let current = currentBlock.previousElementSibling;
+        
+        // Count previous numbered items
+        while (current) {
+          if (current.dataset.type === 'numbered') {
+            position++;
+          } else if (current.dataset.type !== 'numbered') {
+            // If we hit a non-numbered block, reset the sequence
+            break;
+          }
+          current = current.previousElementSibling;
+        }
+        
+        return position;
+      }
+      
+      // Format file size
+      function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+      }
+      
+      // Update all numbered list positions
+      function updateNumberedListPositions() {
+        const allBlocks = editor.querySelectorAll('.wb-block');
+        let currentNumber = 1;
+        
+        allBlocks.forEach((block) => {
+          if (block.dataset.type === 'numbered') {
+            const numberSpan = block.querySelector('.wb-content > div > span');
+            if (numberSpan) {
+              numberSpan.textContent = currentNumber + '.';
+              currentNumber++;
+            }
+          } else {
+            // Reset numbering when we hit a non-numbered block
+            currentNumber = 1;
+          }
+        });
+      }
+      
+      // Create a block
+      function createBlock(type, content = '') {
+    const block = document.createElement('div');
+    block.className = 'wb-block';
+    block.dataset.type = type;
+    
+    const blockId = 'block-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+    block.dataset.id = blockId;
+    
+        let contentHTML = '';
+        switch(type) {
+          case 'heading1':
+            contentHTML = `<h1 contenteditable="true" class="wb-h1" style="font-size: 2em; font-weight: 700; margin: 0.67em 0; outline: none;">${content}</h1>`;
+            break;
+          case 'heading2':
+            contentHTML = `<h2 contenteditable="true" class="wb-h2" style="font-size: 1.5em; font-weight: 700; margin: 0.75em 0; outline: none;">${content}</h2>`;
+            break;
+          case 'heading3':
+            contentHTML = `<h3 contenteditable="true" class="wb-h3" style="font-size: 1.17em; font-weight: 700; margin: 0.83em 0; outline: none;">${content}</h3>`;
+            break;
+          case 'bulleted':
+            contentHTML = `<ul style="margin: 0; padding-left: 1.5em;"><li contenteditable="true" style="outline: none; list-style-type: disc;">${content}</li></ul>`;
+            break;
+          case 'numbered':
+            // Get the position of this numbered item in the sequence
+            const numberedPosition = getNumberedListPosition(block);
+            contentHTML = `<div style="display: flex; align-items: flex-start; gap: 8px; padding-left: 1.5em;"><span style="min-width: 20px; color: #666; user-select: none;">${numberedPosition}.</span><div contenteditable="true" style="outline: none; flex: 1;">${content}</div></div>`;
+            break;
+          case 'checklist':
+            contentHTML = `<div style="display: flex; align-items: center; gap: 8px;"><input type="checkbox" style="margin: 0;"><span contenteditable="true" style="outline: none; flex: 1;">${content}</span></div>`;
+            break;
+          case 'toggle':
+            contentHTML = `<div class="wb-toggle" data-open="true">
+              <div class="wb-toggle-caret">▼</div>
+              <div class="wb-toggle-title" contenteditable="true" style="outline: none; flex: 1;">${content}</div>
+            </div>`;
+            break;
+          case 'image':
+            contentHTML = `<div class="wb-media wb-image-block" data-align="center" style="--w: 60%">
+              <div class="wb-media-toolbar">
+                <button class="wb-media-upload">Upload</button>
+                <button class="wb-media-url">From URL</button>
+              </div>
+              <div class="wb-media-preview wb-media-empty">
+                ${content.src ? `<img src="${content.src}" alt="${content.caption || ''}" style="width: 100%; border-radius: 8px;">` : 'Click Upload or From URL'}
+              </div>
+              <input class="wb-media-caption" placeholder="Add a caption..." value="${content.caption || ''}" style="outline: none; text-align: center; font-size: 14px; color: #666; margin-top: 8px;">
+              <div class="wb-image-controls" style="display: none; position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.7); border-radius: 4px; padding: 4px;">
+                <button class="wb-image-align" data-align="left" title="Align Left">⬅️</button>
+                <button class="wb-image-align" data-align="center" title="Align Center">↔️</button>
+                <button class="wb-image-align" data-align="right" title="Align Right">➡️</button>
+                <button class="wb-image-resize" title="Resize">↔️</button>
+              </div>
+            </div>`;
+            break;
+          case 'file':
+            contentHTML = `<div class="wb-media wb-file-block">
+              <div class="wb-media-toolbar">
+                <button class="wb-media-upload">Upload</button>
+                <button class="wb-media-url">From URL</button>
+              </div>
+              <div class="wb-media-preview wb-media-empty">
+                ${content.url ? `<div class="wb-media-card"><span class="wb-media-icon">📎</span><a href="${content.url}" target="_blank">${content.name || 'Untitled'}</a></div>` : 'No file yet'}
+              </div>
+            </div>`;
+            break;
+          case 'code':
+            contentHTML = `<pre style="background: #f5f5f5; padding: 1em; border-radius: 4px; font-family: 'Courier New', monospace; margin: 0;"><code contenteditable="true" style="outline: none;">${content}</code></pre>`;
+            break;
+          case 'quote':
+            contentHTML = `<blockquote contenteditable="true" style="border-left: 4px solid #ddd; padding-left: 1em; margin: 0; font-style: italic; color: #666; outline: none;">${content}</blockquote>`;
+            break;
+          case 'divider':
+            contentHTML = `<hr style="border: none; border-top: 1px solid #ddd; margin: 1em 0;">`;
+            break;
+          default: // paragraph
+            contentHTML = `<p contenteditable="true" style="margin: 0; outline: none;">${content}</p>`;
+        }
+    
+        block.innerHTML = `
+          <div class="wb-gutter" style="width: 32px; display: flex; gap: 6px; visibility: hidden; align-items: center;">
+            <div class="wb-handle" style="width: 18px; height: 18px; border-radius: 6px; border: 1px solid #ddd; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: grab;" title="Drag to reorder">⋮</div>
+            <div class="wb-plus" style="width: 18px; height: 18px; border-radius: 6px; border: 1px solid #ddd; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: pointer;" title="Add block">+</div>
+          </div>
+          <div class="wb-content" style="flex: 1; min-height: 1.5em;">
+            ${contentHTML}
+          </div>
+        `;
+    
+        // Show gutter on hover
+        block.addEventListener('mouseenter', () => {
+          block.querySelector('.wb-gutter').style.visibility = 'visible';
+        });
+        block.addEventListener('mouseleave', () => {
+          block.querySelector('.wb-gutter').style.visibility = 'hidden';
+        });
+        
+        // Add event listeners for gutter buttons
+        const plusBtn = block.querySelector('.wb-plus');
+        const handleBtn = block.querySelector('.wb-handle');
+        
+        if (plusBtn) {
+          plusBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showSlashMenu(block, block.querySelector('[contenteditable]'));
+          });
+        }
+        
+        if (handleBtn) {
+          handleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showBlockMenu(block);
+          });
+        }
+        
+        // Add specific event listeners for new block types
+        if (type === 'toggle') {
+          setupToggleEvents(block);
+        } else if (type === 'image') {
+          setupImageEvents(block);
+        } else if (type === 'file') {
+          setupFileEvents(block);
+        }
+    
+    // Add event listeners
+    setupBlockEvents(block);
+    
+    // Add save listener
+    addSaveListener(block);
+    
+    return block;
+  }
+  
+  // Setup block events
+  function setupBlockEvents(block) {
+    const editable = block.querySelector('[contenteditable="true"]');
+    if (!editable) return;
+
+    // Check if this block is inside a toggle
+    const isInsideToggle = block.querySelector('.wb-toggle') || block.classList.contains('wb-toggle-child');
+    
+    editable.addEventListener('keydown', (e) => {
+      
+      // Handle Backspace key
+      if (e.key === 'Backspace') {
+        const isEmpty = editable.textContent.trim() === '';
+        
+        if (isEmpty) {
+          // If inside a toggle and empty, exit the toggle by converting to paragraph
+          if (block.classList.contains('wb-toggle-child')) {
+            e.preventDefault();
+            const newBlock = createBlock('paragraph', '');
+            block.replaceWith(newBlock);
+            const newEditable = newBlock.querySelector('[contenteditable="true"]');
+            if (newEditable) {
+              newEditable.focus();
+            }
+            return;
+          }
+          
+          // Regular backspace behavior for non-toggle blocks
+          const prevBlock = block.previousElementSibling;
+          if (prevBlock && prevBlock.classList.contains('wb-block')) {
+            e.preventDefault();
+            const prevEditable = prevBlock.querySelector('[contenteditable="true"]');
+            if (prevEditable) {
+              prevEditable.focus();
+              const range = document.createRange();
+              range.selectNodeContents(prevEditable);
+              range.collapse(false);
+              const sel = window.getSelection();
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
+          }
+        }
+      }
+    });
+
+    // Focus and typing
+    editable.addEventListener('focus', () => {
+      block.classList.add('focused');
+    });
+    
+    editable.addEventListener('blur', () => {
+      block.classList.remove('focused');
+    });
+    
+    // Keyboard shortcuts
+    editable.addEventListener('keydown', (e) => {
+      // Slash command
+      if (e.key === '/' && editable.textContent.trim() === '') {
+        e.preventDefault();
+        showSlashMenu(block, editable);
+        return;
+      }
+      
+      // Toggle block specific behavior
+      if (block.dataset.type === 'toggle') {
+        // ArrowLeft on caret at start: toggle open/closed
+        if (e.key === 'ArrowLeft' && editable.selectionStart === 0) {
+          const caret = block.querySelector('.wb-toggle-caret');
+          if (caret) {
+            e.preventDefault();
+            toggleToggleBlock(block);
+            return;
+          }
+        }
+        
+        // Enter in toggle: create indented child
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          
+          const currentType = block.dataset.type;
+          const currentText = editable.textContent.trim();
+          
+          // If it's a list type and has content, continue the list
+          if ((currentType === 'bulleted' || currentType === 'numbered' || currentType === 'checklist') && currentText !== '') {
+            const newBlock = createBlock(currentType);
+            newBlock.style.marginLeft = '16px';
+            newBlock.classList.add('wb-toggle-child');
+            console.log('Toggle block list continuation: Created indented list item');
+            block.insertAdjacentElement('afterend', newBlock);
+            const newEditable = newBlock.querySelector('[contenteditable]');
+            if (newEditable) {
+              newEditable.focus();
+            }
+            // Update numbered list positions after adding new item
+            if (currentType === 'numbered') {
+              setTimeout(updateNumberedListPositions, 10);
+            }
+            return;
+          }
+          
+          // Default: create paragraph
+          const newBlock = createBlock('paragraph');
+          newBlock.style.marginLeft = '16px';
+          newBlock.classList.add('wb-toggle-child');
+          console.log('Toggle block Enter: Created indented child block');
+          block.insertAdjacentElement('afterend', newBlock);
+          const newEditable = newBlock.querySelector('[contenteditable]');
+          if (newEditable) {
+            newEditable.focus();
+          }
+          return;
+        }
+      }
+      
+      // Handle Enter key for blocks inside toggle (child blocks)
+      if (e.key === 'Enter' && block.classList.contains('wb-toggle-child')) {
+        e.preventDefault();
+        
+        const currentType = block.dataset.type;
+        const currentText = editable.textContent.trim();
+        
+        // If it's a list type and has content, continue the list
+        if ((currentType === 'bulleted' || currentType === 'numbered' || currentType === 'checklist') && currentText !== '') {
+          const newBlock = createBlock(currentType);
+          newBlock.style.marginLeft = '16px';
+          newBlock.classList.add('wb-toggle-child');
+          console.log('Toggle child block list continuation: Created indented list item');
+          block.insertAdjacentElement('afterend', newBlock);
+          const newEditable = newBlock.querySelector('[contenteditable]');
+          if (newEditable) {
+            newEditable.focus();
+          }
+          // Update numbered list positions after adding new item
+          if (currentType === 'numbered') {
+            setTimeout(updateNumberedListPositions, 10);
+          }
+          return;
+        }
+        
+        // Default: create paragraph
+        const newBlock = createBlock('paragraph', '');
+        newBlock.style.marginLeft = '16px';
+        newBlock.classList.add('wb-toggle-child');
+        console.log('Toggle child block Enter: Created indented child block');
+        
+        // Insert after current block
+        block.parentNode.insertBefore(newBlock, block.nextSibling);
+        
+        // Focus the new block
+        const newEditable = newBlock.querySelector('[contenteditable="true"]');
+        newEditable.focus();
+        return;
+      }
+  
+      // Enter key - smart list continuation
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        
+        const currentType = block.dataset.type;
+        const currentText = editable.textContent.trim();
+        
+        // If current block is empty and it's a list item, convert to paragraph
+        if (currentText === '' && (currentType === 'bulleted' || currentType === 'numbered' || currentType === 'checklist')) {
+          const newBlock = createBlock('paragraph');
+          
+          // Check if we're inside a toggle (either as child or as toggle block itself)
+          const isInsideToggle = block.classList.contains('wb-toggle-child') || block.querySelector('.wb-toggle');
+          
+          if (isInsideToggle) {
+            newBlock.style.marginLeft = '16px';
+            newBlock.classList.add('wb-toggle-child');
+          }
+          
+          block.replaceWith(newBlock);
+          const newEditable = newBlock.querySelector('[contenteditable]');
+          if (newEditable) {
+            newEditable.focus();
+          }
+          // Update numbered list positions after converting
+          if (currentType === 'numbered') {
+            setTimeout(updateNumberedListPositions, 10);
+          }
+          return;
+        }
+        
+        // If current block is a list type and has content, continue the list
+        if ((currentType === 'bulleted' || currentType === 'numbered' || currentType === 'checklist') && currentText !== '') {
+          const newBlock = createBlock(currentType);
+          
+          // Check if we're inside a toggle (either as child or as toggle block itself)
+          const isInsideToggle = block.classList.contains('wb-toggle-child') || block.querySelector('.wb-toggle');
+          
+          console.log('List continuation debug:', {
+            currentType,
+            isInsideToggle,
+            hasToggleChild: block.classList.contains('wb-toggle-child'),
+            hasToggleElement: !!block.querySelector('.wb-toggle'),
+            blockElement: block
+          });
+          
+          if (isInsideToggle) {
+            newBlock.style.marginLeft = '16px';
+            newBlock.classList.add('wb-toggle-child');
+            console.log('Created indented list item inside toggle');
+          } else {
+            console.log('Created regular list item outside toggle');
+          }
+          
+          block.insertAdjacentElement('afterend', newBlock);
+          const newEditable = newBlock.querySelector('[contenteditable]');
+          if (newEditable) {
+            newEditable.focus();
+          }
+          // Update numbered list positions after adding new item
+          if (currentType === 'numbered') {
+            setTimeout(updateNumberedListPositions, 10);
+          }
+          return;
+        }
+        
+        // Default: create paragraph block
+        const newBlock = createBlock('paragraph');
+        
+        // Check if we're inside a toggle (either as child or as toggle block itself)
+        const isInsideToggle = block.classList.contains('wb-toggle-child') || block.querySelector('.wb-toggle');
+        
+        if (isInsideToggle) {
+          newBlock.style.marginLeft = '16px';
+          newBlock.classList.add('wb-toggle-child');
+        }
+        
+        block.insertAdjacentElement('afterend', newBlock);
+        const newEditable = newBlock.querySelector('[contenteditable]');
+        if (newEditable) {
+          newEditable.focus();
+        }
+        return;
+      }
+  
+      // Backspace on empty block
+      if (e.key === 'Backspace' && editable.textContent.trim() === '') {
+        e.preventDefault();
+        const currentType = block.dataset.type;
+        
+        // If it's a list item (bulleted, numbered, checklist), convert to paragraph
+        if (currentType === 'bulleted' || currentType === 'numbered' || currentType === 'checklist') {
+          const newBlock = createBlock('paragraph');
+          block.replaceWith(newBlock);
+          const newEditable = newBlock.querySelector('[contenteditable]');
+          if (newEditable) {
+            newEditable.focus();
+          }
+          // Update numbered list positions after converting
+          if (currentType === 'numbered') {
+            setTimeout(updateNumberedListPositions, 10);
+          }
+          return;
+        }
+        
+        // For other block types, try to merge with previous block
+        const prevBlock = block.previousElementSibling;
+        if (prevBlock) {
+          const prevEditable = prevBlock.querySelector('[contenteditable]');
+          if (prevEditable) {
+            prevEditable.focus();
+            block.remove();
+            // Update numbered list positions after removing item
+            setTimeout(updateNumberedListPositions, 10);
+          }
+        }
+        return;
+      }
+  
+      // Rich text shortcuts
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'b') {
+          e.preventDefault();
+          document.execCommand('bold');
+        } else if (e.key === 'i') {
+          e.preventDefault();
+          document.execCommand('italic');
+        } else if (e.key === 'u') {
+          e.preventDefault();
+          document.execCommand('underline');
+        } else if (e.key === 'k') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            // Remove link
+            removeLink(editable);
+          } else {
+            // Create link
+            showLinkDialog(editable);
+          }
+        }
+      }
+    });
+    
+    // Click to focus
+    editable.addEventListener('click', () => {
+      editable.focus();
+    });
+  }
+  
+  // Slash menu
+  function showSlashMenu(block, editable) {
+    const menu = document.createElement('div');
+    menu.className = 'wb-slash-menu';
+    menu.style.cssText = `
+      position: absolute;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      z-index: 1000;
+      min-width: 280px;
+      max-height: 300px;
+      overflow-y: auto;
+    `;
+    
+    Object.entries(blockTypes).forEach(([key, type]) => {
+      const item = document.createElement('div');
+      item.className = 'wb-slash-item';
+      item.style.cssText = `
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        cursor: pointer;
+        border-bottom: 1px solid #f0f0f0;
+      `;
+      item.innerHTML = `
+        <div style="width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; margin-right: 12px; font-size: 16px;">${type.icon}</div>
+        <div style="flex: 1;">
+          <div style="font-weight: 500; color: #333;">${type.name}</div>
+        </div>
+      `;
+      
+      item.addEventListener('click', () => {
+        const newBlock = type.create();
+        
+        // Check if we're inside a toggle block
+        const isInsideToggle = block.classList.contains('wb-toggle-child') || block.querySelector('.wb-toggle');
+        
+        if (isInsideToggle) {
+          // If inside a toggle, create an indented child block
+          newBlock.style.marginLeft = '16px';
+          newBlock.classList.add('wb-toggle-child');
+          block.insertAdjacentElement('afterend', newBlock);
+        } else {
+          // Regular replacement
+          block.replaceWith(newBlock);
+        }
+        
+        // Update numbered list positions if it's a numbered list
+        if (newBlock.dataset.type === 'numbered') {
+          setTimeout(updateNumberedListPositions, 10);
+        }
+        
+        const newEditable = newBlock.querySelector('[contenteditable]');
+        if (newEditable) {
+          newEditable.focus();
+        }
+        menu.remove();
+      });
+      
+      menu.appendChild(item);
+    });
+    
+    document.body.appendChild(menu);
+    
+    const rect = editable.getBoundingClientRect();
+    menu.style.left = rect.left + 'px';
+    menu.style.top = (rect.bottom + 5) + 'px';
+    
+    // Close menu when clicking outside
+    const closeMenu = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener('click', closeMenu);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeMenu), 10);
+  }
+  
+  // Block menu (3-dots menu)
+  function showBlockMenu(block) {
+    const menu = document.createElement('div');
+    menu.className = 'wb-block-menu';
+    menu.style.cssText = `
+      position: absolute;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      z-index: 1000;
+      min-width: 200px;
+    `;
+    
+    const menuItems = [
+      { icon: '📋', name: 'Duplicate', action: () => duplicateBlock(block) },
+      { icon: '🔗', name: 'Copy link', action: () => copyBlockLink(block) },
+      { icon: '📤', name: 'Move to', action: () => moveBlock(block) },
+      { icon: '🗑️', name: 'Delete', action: () => deleteBlock(block) }
+    ];
+    
+    menuItems.forEach(item => {
+      const menuItem = document.createElement('div');
+      menuItem.className = 'wb-menu-item';
+      menuItem.style.cssText = `
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        cursor: pointer;
+        border-bottom: 1px solid #f0f0f0;
+      `;
+      menuItem.innerHTML = `
+        <div style="width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; margin-right: 12px; font-size: 16px;">${item.icon}</div>
+        <div style="flex: 1; color: #333;">${item.name}</div>
+      `;
+      
+      menuItem.addEventListener('click', () => {
+        item.action();
+        menu.remove();
+      });
+      
+      menu.appendChild(menuItem);
+    });
+    
+    document.body.appendChild(menu);
+    
+    const rect = block.getBoundingClientRect();
+    menu.style.left = (rect.left - 200) + 'px';
+    menu.style.top = rect.top + 'px';
+    
+    // Close menu when clicking outside
+    const closeMenu = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener('click', closeMenu);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeMenu), 10);
+  }
+  
+  // Block actions
+  function duplicateBlock(block) {
+    const newBlock = createBlock(block.dataset.type, block.querySelector('[contenteditable]')?.textContent || '');
+    block.insertAdjacentElement('afterend', newBlock);
+    const newEditable = newBlock.querySelector('[contenteditable]');
+    if (newEditable) {
+      newEditable.focus();
+    }
+  }
+  
+  // Toggle block functionality
+  function setupToggleEvents(block) {
+    const caret = block.querySelector('.wb-toggle-caret');
+    const title = block.querySelector('.wb-toggle-title');
+    
+    // Make the entire toggle clickable
+    block.addEventListener('click', (e) => {
+      if (e.target === title) return; // Don't toggle when clicking on text
+      toggleToggleBlock(block);
+    });
+    
+    if (caret) {
+      caret.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleToggleBlock(block);
+      });
+    }
+    
+    if (title) {
+      title.addEventListener('click', (e) => {
+        e.stopPropagation();
+        title.focus();
+      });
+      
+      // Enter handling is now in the main keydown event
+    }
+  }
+  
+  function toggleToggleBlock(block) {
+    const isOpen = block.dataset.open === 'true';
+    const caret = block.querySelector('.wb-toggle-caret');
+    
+    if (isOpen) {
+      block.dataset.open = 'false';
+      caret.textContent = '▶';
+      hideToggleChildren(block);
+    } else {
+      block.dataset.open = 'true';
+      caret.textContent = '▼';
+      showToggleChildren(block);
+    }
+  }
+  
+  function hideToggleChildren(toggleBlock) {
+    let current = toggleBlock.nextElementSibling;
+    
+    while (current) {
+      // Check if the block is indented (has the ::before pseudo-element styling)
+      const isIndented = current.style.marginLeft === '16px' || 
+                       current.classList.contains('wb-toggle-child');
+      
+      if (!isIndented) {
+        break; // Stop at non-indented blocks
+      }
+      
+      current.style.display = 'none';
+      current.classList.add('wb-toggle-hidden');
+      current = current.nextElementSibling;
+    }
+  }
+  
+  function showToggleChildren(toggleBlock) {
+    let current = toggleBlock.nextElementSibling;
+    
+    while (current) {
+      // Check if the block is indented
+      const isIndented = current.style.marginLeft === '16px' || 
+                       current.classList.contains('wb-toggle-child');
+      
+      if (!isIndented) {
+        break; // Stop at non-indented blocks
+      }
+      
+      current.style.display = '';
+      current.classList.remove('wb-toggle-hidden');
+      current = current.nextElementSibling;
+    }
+  }
+  
+  function getBlockLevel(block) {
+    // Check if block is indented under a toggle
+    const isIndented = block.style.marginLeft === '16px' || 
+                      block.classList.contains('wb-toggle-child');
+    return isIndented ? 2 : 1;
+  }
+  
+  // Image block functionality
+  function setupImageEvents(block) {
+    const uploadBtn = block.querySelector('.wb-media-upload');
+    const urlBtn = block.querySelector('.wb-media-url');
+    const preview = block.querySelector('.wb-media-preview');
+    const caption = block.querySelector('.wb-media-caption');
+    const controls = block.querySelector('.wb-image-controls');
+    
+    // Upload button
+    if (uploadBtn) {
+      uploadBtn.addEventListener('click', async () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = async (e) => {
+          const file = e.target.files[0];
+          if (file) {
+            try {
+              // For now, create a local URL (in real implementation, upload to server)
+              const localUrl = URL.createObjectURL(file);
+              preview.classList.remove('wb-media-empty');
+              preview.innerHTML = `<img src="${localUrl}" alt="" style="width: 100%; border-radius: 8px;">`;
+              
+              // Store file data
+              block.dataset.media = JSON.stringify({
+                type: 'image',
+                file: {
+                  name: file.name,
+                  size: file.size,
+                  type: file.type,
+                  url: localUrl
+                }
+              });
+              
+              // Hide toolbar after upload
+              hideMediaToolbar(block);
+            } catch (error) {
+              console.error('Image upload error:', error);
+            }
+          }
+        };
+        input.click();
+      });
+    }
+    
+    // URL button
+    if (urlBtn) {
+      urlBtn.addEventListener('click', () => {
+        const url = prompt('Enter image URL:');
+        if (url) {
+          preview.classList.remove('wb-media-empty');
+          preview.innerHTML = `<img src="${url}" alt="" style="width: 100%; border-radius: 8px;">`;
+          block.dataset.media = JSON.stringify({
+            type: 'image',
+            url: url
+          });
+          hideMediaToolbar(block);
+        }
+      });
+    }
+    
+    // Caption editing
+    if (caption) {
+      caption.addEventListener('input', () => {
+        const data = JSON.parse(block.dataset.media || '{}');
+        data.caption = caption.value;
+        block.dataset.media = JSON.stringify(data);
+      });
+      
+      caption.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          const newBlock = createBlock('paragraph');
+          block.insertAdjacentElement('afterend', newBlock);
+          const newEditable = newBlock.querySelector('[contenteditable]');
+          if (newEditable) {
+            newEditable.focus();
+          }
+        }
+      });
+    }
+    
+    // Image controls for alignment and resize
+    if (controls) {
+      block.addEventListener('mouseenter', () => {
+        controls.style.display = 'flex';
+      });
+      
+      block.addEventListener('mouseleave', () => {
+        controls.style.display = 'none';
+      });
+      
+      // Alignment buttons
+      const alignButtons = controls.querySelectorAll('.wb-image-align');
+      alignButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const align = btn.dataset.align;
+          block.dataset.align = align;
+          updateImageAlignment(block, align);
+        });
+      });
+      
+      // Resize button
+      const resizeBtn = controls.querySelector('.wb-image-resize');
+      if (resizeBtn) {
+        resizeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          showImageResizeDialog(block);
+        });
+      }
+    }
+  }
+  
+  function updateImageAlignment(block, align) {
+    const figure = block.querySelector('.wb-image');
+    if (figure) {
+      figure.style.textAlign = align;
+      figure.style.marginLeft = align === 'left' ? '0' : 'auto';
+      figure.style.marginRight = align === 'right' ? '0' : 'auto';
+    }
+  }
+  
+  function showImageResizeDialog(block) {
+    const currentWidth = block.style.getPropertyValue('--w') || '60%';
+    const width = prompt('Image width (percentage):', currentWidth.replace('%', ''));
+    if (width && !isNaN(width) && width > 0 && width <= 100) {
+      block.style.setProperty('--w', width + '%');
+    }
+  }
+  
+  // File block functionality
+  function setupFileEvents(block) {
+    const uploadBtn = block.querySelector('.wb-media-upload');
+    const urlBtn = block.querySelector('.wb-media-url');
+    const preview = block.querySelector('.wb-media-preview');
+    
+    const renderCard = (name, url) => {
+      preview.classList.remove('wb-media-empty');
+      preview.innerHTML = `<div class="wb-media-card"><span class="wb-media-icon">📎</span><a href="${url}" target="_blank">${name}</a></div>`;
+    };
+    
+    // Upload button
+    if (uploadBtn) {
+      uploadBtn.addEventListener('click', async () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '*/*';
+        input.onchange = async (e) => {
+          const file = e.target.files[0];
+          if (file) {
+            try {
+              // For now, create a local URL (in real implementation, upload to server)
+              const localUrl = URL.createObjectURL(file);
+              renderCard(file.name, localUrl);
+              
+              // Store file data
+              block.dataset.media = JSON.stringify({
+                type: 'file',
+                file: {
+                  name: file.name,
+                  size: file.size,
+                  type: file.type,
+                  url: localUrl
+                }
+              });
+              
+              // Hide toolbar after upload
+              hideMediaToolbar(block);
+            } catch (error) {
+              console.error('File upload error:', error);
+            }
+          }
+        };
+        input.click();
+      });
+    }
+    
+    // URL button
+    if (urlBtn) {
+      urlBtn.addEventListener('click', () => {
+        const url = prompt('Enter file URL:');
+        if (url) {
+          const name = url.split('/').pop() || 'file';
+          renderCard(name, url);
+          block.dataset.media = JSON.stringify({
+            type: 'file',
+            url: url,
+            name: name
+          });
+          hideMediaToolbar(block);
+        }
+      });
+    }
+  }
+  
+  function showFileUploadDialog(block) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.gif,.mp4,.mp3,.zip,.rar';
+    input.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        handleFileUpload(block, e.target.files[0]);
+      }
+    });
+    input.click();
+  }
+  
+  function hideMediaToolbar(block) {
+    const toolbar = block.querySelector('.wb-media-toolbar');
+    if (toolbar) {
+      toolbar.style.display = 'none';
+    }
+  }
+  
+  function showMediaToolbar(block) {
+    const toolbar = block.querySelector('.wb-media-toolbar');
+    if (toolbar) {
+      toolbar.style.display = 'flex';
+    }
+  }
+  
+  // Link dialog functionality
+  function showLinkDialog(editable) {
+    const selection = window.getSelection();
+    const selectedText = selection.toString().trim();
+    
+    const dialog = document.createElement('div');
+    dialog.className = 'wb-link-dialog';
+    dialog.style.cssText = `
+      position: absolute;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      padding: 12px;
+      z-index: 1000;
+      min-width: 300px;
+    `;
+    
+    dialog.innerHTML = `
+      <div style="margin-bottom: 8px;">
+        <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">Text:</label>
+        <input type="text" id="link-text" value="${selectedText}" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+      </div>
+      <div style="margin-bottom: 12px;">
+        <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">URL:</label>
+        <input type="url" id="link-url" placeholder="https://example.com" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+      </div>
+      <div style="display: flex; gap: 8px; justify-content: flex-end;">
+        <button id="link-cancel" style="padding: 6px 12px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer;">Cancel</button>
+        <button id="link-apply" style="padding: 6px 12px; border: none; background: #2383e2; color: white; border-radius: 4px; cursor: pointer;">Apply</button>
+      </div>
+    `;
+    
+    document.body.appendChild(dialog);
+    
+    // Position dialog
+    const rect = editable.getBoundingClientRect();
+    dialog.style.left = rect.left + 'px';
+    dialog.style.top = (rect.bottom + 5) + 'px';
+    
+    // Focus URL input
+    const urlInput = dialog.querySelector('#link-url');
+    urlInput.focus();
+    
+    // Event listeners
+    dialog.querySelector('#link-cancel').addEventListener('click', () => {
+      dialog.remove();
+    });
+    
+    dialog.querySelector('#link-apply').addEventListener('click', () => {
+      const text = dialog.querySelector('#link-text').value.trim();
+      const url = dialog.querySelector('#link-url').value.trim();
+      
+      if (text && url && isValidUrl(url)) {
+        createLink(editable, text, url);
+        dialog.remove();
+      } else {
+        alert('Please enter valid text and URL');
+      }
+    });
+    
+    // Close on escape
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') {
+        dialog.remove();
+        document.removeEventListener('keydown', handleEscape);
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    
+    // Close on outside click
+    const handleOutsideClick = (e) => {
+      if (!dialog.contains(e.target)) {
+        dialog.remove();
+        document.removeEventListener('click', handleOutsideClick);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', handleOutsideClick), 10);
+  }
+  
+  function createLink(editable, text, url) {
+    // If text is selected, replace it with link
+    if (window.getSelection().toString().trim()) {
+      document.execCommand('createLink', false, url);
+    } else {
+      // Insert link at cursor
+      const link = `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+      document.execCommand('insertHTML', false, link);
+    }
+  }
+  
+  function removeLink(editable) {
+    // Check if cursor is inside a link
+    const selection = window.getSelection();
+    if (selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      const link = range.commonAncestorContainer.closest ? 
+        range.commonAncestorContainer.closest('a') : 
+        range.commonAncestorContainer.parentElement?.closest('a');
+      
+      if (link) {
+        // Unwrap the link
+        const parent = link.parentNode;
+        while (link.firstChild) {
+          parent.insertBefore(link.firstChild, link);
+        }
+        parent.removeChild(link);
+      }
+    }
+  }
+  
+  function isValidUrl(string) {
+    try {
+      const url = new URL(string);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch (_) {
+      return false;
+    }
+  }
+  
+  function copyBlockLink(block) {
+    const blockId = block.dataset.id;
+    const link = `${window.location.origin}${window.location.pathname}#${blockId}`;
+    navigator.clipboard.writeText(link);
+    console.log('Block link copied:', link);
+  }
+  
+  function moveBlock(block) {
+    // TODO: Implement move to different page/workspace
+    console.log('Move block:', block.dataset.id);
+  }
+  
+  function deleteBlock(block) {
+    if (confirm('Delete this block?')) {
+      block.remove();
+      if (block.dataset.type === 'numbered') {
+        setTimeout(updateNumberedListPositions, 10);
+      }
+    }
+  }
+  
+  // Save functionality
+  let saveTimeout = null;
+  
+  function saveContent() {
+    if (!currentPageName) return;
+    
+    const blocks = [];
+    editor.querySelectorAll('.wb-block').forEach(block => {
+      const type = block.dataset.type;
+      const editable = block.querySelector('[contenteditable]');
+      let content = '';
+      
+      if (editable) {
+        content = editable.textContent || '';
+      }
+      
+      blocks.push({
+        id: block.dataset.id,
+        type: type,
+        content: content
+      });
+    });
+    
+    const contentData = {
+      blocks: blocks,
+      timestamp: new Date().toISOString()
+    };
+    
+    // Get CSRF token from Frappe's global variable
+    const csrfToken = window.csrf_token || 
+                     (window.frappe && window.frappe.csrf_token) ||
+                     document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+    
+    console.log('Using CSRF token:', csrfToken);
+    
+    // Save to backend
+    fetch('/api/method/workbench.api.update_page', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      },
+      body: JSON.stringify({
+        name: currentPageName,
+        content_json: JSON.stringify(contentData)
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        console.log('Content saved successfully');
+      } else {
+        console.error('Save failed:', data);
+      }
+    })
+    .catch(error => {
+      console.error('Save error:', error);
+    });
+  }
+  
+  function debouncedSave() {
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
+    }
+    saveTimeout = setTimeout(saveContent, 2000); // Save after 2 seconds of inactivity
+  }
+  
+  // Create a new page
+  function createNewPage(title = 'New Page', workspace = null) {
+    const csrfToken = window.csrf_token || 
+                     (window.frappe && window.frappe.csrf_token);
+    
+    const targetWorkspace = workspace || currentWorkspace;
+    if (!targetWorkspace) {
+      console.error('No workspace selected for page creation');
+      return;
+    }
+    
+    fetch('/api/method/workbench.api.create_page', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      },
+      body: JSON.stringify({
+        workspace: targetWorkspace,
+        title: title,
+        content_json: null,
+        visibility: 'Use Workspace',
+        company: null,
+        collaborators: null
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        currentPageName = data.message.name;
+        document.getElementById('wb-title').value = data.message.title;
+        console.log('New page created:', data.message);
+        
+        // Reload pages list
+        if (currentWorkspace) {
+          loadPages();
+        }
+        
+        // Refresh workspace pages if created in a workspace
+        if (targetWorkspace) {
+          refreshWorkspacePages(targetWorkspace);
+        }
+      } else {
+        console.error('Page creation failed:', data);
+      }
+    })
+    .catch(error => {
+      console.error('Page creation error:', error);
+    });
+  }
+  
+  // Add save trigger to all content changes
+  function addSaveListener(block) {
+    const editable = block.querySelector('[contenteditable]');
+    if (editable) {
+      editable.addEventListener('input', debouncedSave);
+      editable.addEventListener('blur', debouncedSave);
+    }
+  }
+  
+  // Workspace and page management
+  let currentWorkspace = null;
+  let currentPageName = null;
+  
+  // Initialize workspace and page management
+  initializeWorkspaceManagement();
+  
+  // Workspace management functions
+  function initializeWorkspaceManagement() {
+    loadWorkspaces();
+    setupWorkspaceEventListeners();
+  }
+  
+  function loadWorkspaces() {
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    fetch('/api/method/workbench.api.get_user_workspaces', {
+      method: 'GET',
+      headers: {
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      }
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        populateWorkspaceList(data.message);
+        if (data.message.length > 0 && !currentWorkspace) {
+          currentWorkspace = data.message[0].name;
+          loadPages();
+        }
+      }
+    })
+    .catch(error => {
+      console.error('Error loading workspaces:', error);
+    });
+  }
+  
+  function populateWorkspaceList(workspaces) {
+    const workspaceList = document.getElementById('wb-workspaces');
+    workspaceList.innerHTML = '';
+    
+    workspaces.forEach(workspace => {
+      const workspaceItem = document.createElement('div');
+      workspaceItem.className = 'wb-workspace-item';
+      workspaceItem.dataset.workspaceName = workspace.name;
+      workspaceItem.innerHTML = `
+        <div class="wb-workspace-header">
+          <span class="wb-workspace-icon">🏠</span>
+          <span class="wb-workspace-text">${workspace.title}</span>
+          <span class="wb-workspace-toggle">▼</span>
+        </div>
+        <div class="wb-workspace-pages" style="display: none;">
+          <div class="wb-workspace-new-page">
+            <span class="wb-workspace-new-icon">+</span>
+            <span class="wb-workspace-new-text">New page</span>
+          </div>
+          <div class="wb-workspace-page-list"></div>
+        </div>
+      `;
+      
+      // Toggle workspace expansion
+      const toggle = workspaceItem.querySelector('.wb-workspace-toggle');
+      const pagesContainer = workspaceItem.querySelector('.wb-workspace-pages');
+      
+      workspaceItem.querySelector('.wb-workspace-header').addEventListener('click', () => {
+        const isExpanded = pagesContainer.style.display !== 'none';
+        pagesContainer.style.display = isExpanded ? 'none' : 'block';
+        toggle.textContent = isExpanded ? '▶' : '▼';
+        
+        // Load pages when expanding
+        if (!isExpanded) {
+          currentWorkspace = workspace.name;
+          loadWorkspacePages(workspace.name, pagesContainer.querySelector('.wb-workspace-page-list'));
+        }
+      });
+      
+      // New page in workspace
+      const newPageItem = workspaceItem.querySelector('.wb-workspace-new-page');
+      newPageItem.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const title = prompt('Page name:', 'New Page');
+        if (title) {
+          createNewPage(title, workspace.name);
+        }
+      });
+      
+      workspaceList.appendChild(workspaceItem);
+    });
+  }
+  
+  function setupWorkspaceEventListeners() {
+    const newWorkspaceBtn = document.getElementById('wb-new-workspace');
+    const newPageBtn = document.getElementById('wb-new-page');
+    const newPageItem = document.querySelector('.wb-new-page-item');
+    const addWorkspaceItem = document.querySelector('.wb-add-workspace-item');
+    
+    if (newWorkspaceBtn) {
+      newWorkspaceBtn.addEventListener('click', () => {
+        const title = prompt('Workspace name:', 'New Workspace');
+        if (title) {
+          createNewWorkspace(title);
+        }
+      });
+    }
+    
+    if (addWorkspaceItem) {
+      addWorkspaceItem.addEventListener('click', () => {
+        const title = prompt('Workspace name:', 'New Workspace');
+        if (title) {
+          createNewWorkspace(title);
+        }
+      });
+    }
+    
+    if (newPageBtn) {
+      newPageBtn.addEventListener('click', () => {
+        const title = prompt('Page name:', 'New Page');
+        if (title) {
+          createNewPage(title, currentWorkspace);
+        }
+      });
+    }
+    
+    if (newPageItem) {
+      newPageItem.addEventListener('click', () => {
+        const title = prompt('Page name:', 'New Page');
+        if (title) {
+          createNewPage(title, currentWorkspace);
+        }
+      });
+    }
+  }
+  
+  function createNewWorkspace(title) {
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    fetch('/api/method/workbench.api.create_workspace', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      },
+      body: JSON.stringify({
+        title: title,
+        description: '',
+        visibility: 'Private',
+        company: null,
+        collaborators: null
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        console.log('New workspace created:', data.message);
+        loadWorkspaces(); // This will refresh the workspace list
+        currentWorkspace = data.message;
+      } else {
+        console.error('Workspace creation failed:', data);
+      }
+    })
+    .catch(error => {
+      console.error('Workspace creation error:', error);
+    });
+  }
+  
+  function loadPages() {
+    if (!currentWorkspace) return;
+    
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    fetch(`/api/method/workbench.api.get_workspace_pages?workspace=${currentWorkspace}`, {
+      method: 'GET',
+      headers: {
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      }
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        populatePageList(data.message);
+      }
+    })
+    .catch(error => {
+      console.error('Error loading pages:', error);
+    });
+  }
+  
+  function loadWorkspacePages(workspaceName, container) {
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    fetch('/api/method/workbench.api.get_workspace_pages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      },
+      body: JSON.stringify({
+        workspace: workspaceName
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        populateWorkspacePageList(data.message, container);
+      }
+    })
+    .catch(error => {
+      console.error('Error loading workspace pages:', error);
+    });
+  }
+  
+  function refreshWorkspacePages(workspaceName) {
+    const workspaceItem = document.querySelector(`[data-workspace-name="${workspaceName}"]`);
+    if (workspaceItem) {
+      const pagesContainer = workspaceItem.querySelector('.wb-workspace-page-list');
+      if (pagesContainer) {
+        loadWorkspacePages(workspaceName, pagesContainer);
+      }
+    }
+  }
+  
+  function populatePageList(pages) {
+    const pageList = document.getElementById('wb-private-pages');
+    if (!pageList) return;
+    pageList.innerHTML = '';
+    
+    pages.forEach(page => {
+      const pageItem = createPageItem(page);
+      pageList.appendChild(pageItem);
+    });
+  }
+  
+  function populateWorkspacePageList(pages, container) {
+    container.innerHTML = '';
+    
+    pages.forEach(page => {
+      const pageItem = createPageItem(page);
+      container.appendChild(pageItem);
+    });
+  }
+  
+  function createPageItem(page) {
+    const pageItem = document.createElement('div');
+    pageItem.className = 'wb-page-item';
+    pageItem.innerHTML = `
+      <div class="wb-page-content">
+        <div class="wb-page-title">${page.title}</div>
+        <div class="wb-page-meta">${new Date(page.modified).toLocaleDateString()}</div>
+      </div>
+      <div class="wb-page-actions">
+        <button class="wb-page-menu-btn" title="Page options">⋮</button>
+      </div>
+    `;
+    
+    // Click to load page
+    pageItem.querySelector('.wb-page-content').addEventListener('click', () => {
+      loadPage(page.name);
+    });
+    
+    // Right-click or menu button for page options
+    const menuBtn = pageItem.querySelector('.wb-page-menu-btn');
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showPageMenu(page, pageItem);
+    });
+    
+    pageItem.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showPageMenu(page, pageItem);
+    });
+    
+    return pageItem;
+  }
+  
+  function loadPage(pageName) {
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    fetch(`/api/method/workbench.api.get_page?name=${pageName}`, {
+      method: 'GET',
+      headers: {
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      }
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        currentPageName = data.message.name;
+        document.getElementById('wb-title').value = data.message.title;
+        
+        // Load content
+        if (data.message.content_json) {
+          try {
+            const content = JSON.parse(data.message.content_json);
+            loadPageContent(content);
+          } catch (e) {
+            console.error('Error parsing page content:', e);
+          }
+        }
+      }
+    })
+    .catch(error => {
+      console.error('Error loading page:', error);
+    });
+  }
+  
+  function loadPageContent(content) {
+    const editor = document.getElementById('wb-editor');
+    editor.innerHTML = '';
+    
+    if (content.blocks) {
+      content.blocks.forEach(blockData => {
+        const block = createBlock(blockData.type, blockData.content || '');
+        block.dataset.id = blockData.id;
+        editor.appendChild(block);
+        addSaveListener(block);
+      });
+    }
+    
+    // Focus first block
+    const firstBlock = editor.querySelector('.wb-block');
+    if (firstBlock) {
+      const editable = firstBlock.querySelector('[contenteditable]');
+      if (editable) {
+        setTimeout(() => editable.focus(), 100);
+      }
+    }
+  }
+  
+  // Page menu functionality
+  function showPageMenu(page, pageItem) {
+    const menu = document.createElement('div');
+    menu.className = 'wb-page-menu';
+    menu.style.cssText = `
+      position: absolute;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      z-index: 1000;
+      min-width: 200px;
+    `;
+    
+    const menuItems = [
+      { icon: '📤', name: 'Move to workspace', action: () => showMoveToWorkspaceDialog(page) },
+      { icon: '📋', name: 'Duplicate', action: () => duplicatePage(page) },
+      { icon: '🗑️', name: 'Delete', action: () => deletePage(page) }
+    ];
+    
+    menuItems.forEach(item => {
+      const menuItem = document.createElement('div');
+      menuItem.className = 'wb-menu-item';
+      menuItem.style.cssText = `
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        cursor: pointer;
+        border-bottom: 1px solid #f0f0f0;
+      `;
+      menuItem.innerHTML = `
+        <div style="width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; margin-right: 12px; font-size: 16px;">${item.icon}</div>
+        <div style="flex: 1; color: #333;">${item.name}</div>
+      `;
+      
+      menuItem.addEventListener('click', () => {
+        item.action();
+        menu.remove();
+      });
+      
+      menu.appendChild(menuItem);
+    });
+    
+    document.body.appendChild(menu);
+    
+    const rect = pageItem.getBoundingClientRect();
+    menu.style.left = (rect.right - 200) + 'px';
+    menu.style.top = rect.top + 'px';
+    
+    // Close menu when clicking outside
+    const closeMenu = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener('click', closeMenu);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeMenu), 10);
+  }
+  
+  // Move page to workspace dialog
+  function showMoveToWorkspaceDialog(page) {
+    // Get workspaces from the workspace list
+    const workspaceItems = document.querySelectorAll('.wb-workspace-item');
+    const workspaces = Array.from(workspaceItems).map(item => {
+      const textElement = item.querySelector('.wb-workspace-text');
+      return {
+        name: item.dataset.workspaceName || textElement.textContent,
+        title: textElement.textContent
+      };
+    });
+    
+    if (workspaces.length <= 1) {
+      alert('No other workspaces available to move to.');
+      return;
+    }
+    
+    const workspaceNames = workspaces.map(ws => ws.title).join('\n');
+    const targetWorkspace = prompt(`Move "${page.title}" to which workspace?\n\nAvailable workspaces:\n${workspaceNames}`);
+    
+    if (targetWorkspace) {
+      const targetWs = workspaces.find(ws => ws.title === targetWorkspace);
+      if (targetWs) {
+        movePageToWorkspace(page.name, targetWs.name);
+      } else {
+        alert('Invalid workspace selected.');
+      }
+    }
+  }
+  
+  // Move page to workspace
+  function movePageToWorkspace(pageName, workspaceName) {
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    fetch('/api/method/workbench.api.move_page_to_workspace', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      },
+      body: JSON.stringify({
+        page_name: pageName,
+        workspace_name: workspaceName
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message && data.message.ok) {
+        console.log('Page moved successfully');
+        loadPages(); // Reload pages list
+      } else {
+        console.error('Move failed:', data.message?.error || data);
+        alert('Failed to move page: ' + (data.message?.error || 'Unknown error'));
+      }
+    })
+    .catch(error => {
+      console.error('Move error:', error);
+      alert('Error moving page: ' + error.message);
+    });
+  }
+  
+  // Duplicate page
+  function duplicatePage(page) {
+    const newTitle = prompt('New page title:', page.title + ' Copy');
+    if (newTitle) {
+      createNewPage(newTitle, currentWorkspace);
+    }
+  }
+  
+  // Delete page
+  function deletePage(page) {
+    if (confirm(`Delete "${page.title}"? This action cannot be undone.`)) {
+      const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+      
+      fetch('/api/method/workbench.api.delete_page', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Frappe-CSRF-Token': csrfToken || 'token'
+        },
+        body: JSON.stringify({
+          name: page.name,
+          hard: 0 // Soft delete
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.message && data.message.ok) {
+          console.log('Page deleted successfully');
+          loadPages(); // Reload pages list
+          // Clear editor if this was the current page
+          if (currentPageName === page.name) {
+            document.getElementById('wb-editor').innerHTML = '';
+            document.getElementById('wb-title').value = '';
+            currentPageName = null;
+          }
+        } else {
+          console.error('Delete failed:', data);
+          alert('Failed to delete page');
+        }
+      })
+      .catch(error => {
+        console.error('Delete error:', error);
+        alert('Error deleting page: ' + error.message);
+      });
+    }
+  }
+  
+  // Create initial block
+  const initialBlock = createBlock('paragraph', 'Type "/" for commands or start typing...');
+  editor.appendChild(initialBlock);
+  addSaveListener(initialBlock);
+  
+  // Focus the initial block
+  setTimeout(() => {
+    const editable = initialBlock.querySelector('[contenteditable]');
+    if (editable) {
+      editable.focus();
+    }
+  }, 100);
+  
+  // Add click handler to editor to create new blocks
+  editor.addEventListener('click', (e) => {
+    // Only handle clicks on the editor container itself, not on blocks
+    if (e.target === editor) {
+      const newBlock = createBlock('paragraph', '');
+      editor.appendChild(newBlock);
+      addSaveListener(newBlock);
+      
+      // Focus the new block
+      setTimeout(() => {
+        const editable = newBlock.querySelector('[contenteditable]');
+        if (editable) {
+          editable.focus();
+        }
+      }, 10);
+    }
+  });
+  
+  // Add event listeners for UI elements
+  const newPageBtn = document.getElementById('wb-new-page');
+  const titleInput = document.getElementById('wb-title');
+  
+  if (newPageBtn) {
+    newPageBtn.addEventListener('click', () => {
+      createNewPage('New Page');
+    });
+  }
+  
+  if (titleInput) {
+    titleInput.addEventListener('blur', () => {
+      const newTitle = titleInput.value.trim() || 'Untitled';
+      if (currentPageName && newTitle !== titleInput.value) {
+        // Update page title
+        const csrfToken = window.csrf_token || 
+                         (window.frappe && window.frappe.csrf_token);
+        
+        fetch('/api/method/workbench.api.update_page', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Frappe-CSRF-Token': csrfToken || 'token'
+          },
+          body: JSON.stringify({
+            name: currentPageName,
+            title: newTitle
+          })
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.message) {
+            console.log('Page title updated');
+          } else {
+            console.error('Title update failed:', data);
+          }
+        })
+        .catch(error => {
+          console.error('Title update error:', error);
+        });
+      }
+    });
+  }
+  
+  console.log('Notion-style workbench with save functionality created successfully');
+}
+
+// Initialize when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+  console.log('DOM loaded, creating Notion-style workbench...');
+  
+  // Debug CSRF token availability
+  console.log('Available CSRF tokens:');
+  console.log('window.csrf_token:', window.csrf_token);
+  console.log('window.frappe?.csrf_token:', window.frappe?.csrf_token);
+  console.log('document.querySelector meta:', document.querySelector('meta[name="csrf-token"]')?.getAttribute('content'));
+  
+  createNotionWorkbench();
+});
+</script>
+{% endblock %}
