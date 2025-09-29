@@ -10,7 +10,9 @@
   "description",
   "owner_user",
   "visibility",
-  "company"
+  "company",
+  "collaborators",
+  "section_break_collab"
  ],
  "fields": [
   {
@@ -45,12 +47,23 @@
    "fieldtype": "Link",
    "label": "Company",
    "options": "Company"
+  },
+  {
+   "fieldname": "collaborators",
+   "fieldtype": "Table",
+   "label": "Collaborators",
+   "options": "Workbench Workspace Collaborator"
+  },
+  {
+   "fieldname": "section_break_collab",
+   "fieldtype": "Section Break",
+   "label": "Collaborators"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-26 10:48:34.550103",
+ "modified": "2025-09-29 15:49:56.120603",
  "modified_by": "Administrator",
  "module": "workbench",
  "name": "Workbench Workspace",

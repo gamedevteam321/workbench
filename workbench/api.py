@@ -5,6 +5,24 @@ import frappe
 from frappe.utils import now
 
 @frappe.whitelist()
+def get_company_users():
+    """Get all users in the current user's company."""
+    user = frappe.session.user
+    user_company = frappe.db.get_value("User", user, "company") or frappe.db.get_default("company")
+    
+    if not user_company:
+        return []
+    
+    users = frappe.get_all(
+        "User",
+        filters={"company": user_company, "enabled": 1},
+        fields=["name", "full_name", "email"],
+        order_by="full_name asc",
+    )
+    
+    return users
+
+@frappe.whitelist()
 def get_user_workspaces():
     """Get all workspaces accessible to the current user."""
     user = frappe.session.user
@@ -78,19 +96,36 @@ def create_workspace(title: str = "New Workspace", description: str = "", visibi
     
     if collaborators:
         for c in collaborators:
-            user_id = c.get("user")
+            if isinstance(c, dict):
+                user_id = c.get("user")
+                access = c.get("access", "Viewer")
+            elif isinstance(c, str):
+                # Handle case where collaborator is just a user ID string
+                user_id = c
+                access = "Viewer"
+            else:
+                continue
+                
             # Validate that the user exists
             if not frappe.db.exists("User", user_id):
                 frappe.throw(f"User {user_id} does not exist")
             workspace.append("collaborators", {
                 "user": user_id,
-                "access": c.get("access", "Viewer"),
+                "access": access,
             })
     
     workspace.insert()
+    frappe.db.commit()  # Commit workspace first so collaborators are saved
 
-    # Create a default "Getting Started" page
-    create_page(workspace.name, "Getting Started", get_default_page_content())
+    # Create a default "Getting Started" page with same visibility as workspace
+    create_page(
+        workspace.name, 
+        "Getting Started", 
+        get_default_page_content(),
+        visibility=workspace.visibility,
+        company=workspace.company,
+        collaborators=collaborators
+    )
 
     return workspace.name
 
@@ -256,18 +291,163 @@ def create_page(workspace: str, title: str = "Untitled", content_json=None, visi
     
     if collaborators:
         for c in collaborators:
-            user_id = c.get("user")
+            if isinstance(c, dict):
+                user_id = c.get("user")
+                access = c.get("access", "Viewer")
+            elif isinstance(c, str):
+                # Handle case where collaborator is just a user ID string
+                user_id = c
+                access = "Viewer"
+            else:
+                continue
+                
             if not frappe.db.exists("User", user_id):
                 frappe.throw(f"User {user_id} does not exist")
             doc.append("collaborators", {
                 "user": user_id,
-                "access": c.get("access", "Viewer"),
+                "access": access,
             })
     
     doc.insert()
     frappe.db.commit()
     
     return {"name": doc.name, "title": doc.title, "workspace": workspace}
+
+@frappe.whitelist()
+def update_page_settings(name: str, title: str = None, visibility: str = None, collaborators=None):
+    """Update page settings including title, visibility, and collaborators."""
+    # Check if page exists and user has access
+    page = frappe.get_doc("Notion Page", name)
+    if not has_page_access(page, frappe.session.user, write=True):
+        frappe.throw("You don't have permission to update this page")
+    
+    # Update title if provided
+    if title is not None:
+        new_title = title or "Untitled"
+        # Check if title is changing and if new title already exists in the same workspace
+        if new_title != page.title and frappe.db.exists("Notion Page", {"title": new_title, "workspace": page.workspace}):
+            # Make title unique
+            base_title = new_title
+            counter = 1
+            while frappe.db.exists("Notion Page", {"title": f"{base_title} {counter}", "workspace": page.workspace}):
+                counter += 1
+            new_title = f"{base_title} {counter}"
+        page.title = new_title
+    
+    # Update visibility if provided
+    if visibility is not None:
+        page.visibility = visibility
+    
+    # Handle collaborators
+    if collaborators is not None:
+        if isinstance(collaborators, str):
+            try:
+                collaborators = frappe.parse_json(collaborators)
+            except Exception:
+                collaborators = None
+        
+        # Clear existing collaborators
+        page.collaborators = []
+        
+        if collaborators:
+            for c in collaborators:
+                if isinstance(c, dict):
+                    user_id = c.get("user")
+                    access = c.get("access", "Viewer")
+                elif isinstance(c, str):
+                    user_id = c
+                    access = "Viewer"
+                else:
+                    continue
+                    
+                if not frappe.db.exists("User", user_id):
+                    frappe.throw(f"User {user_id} does not exist")
+                page.append("collaborators", {
+                    "user": user_id,
+                    "access": access,
+                })
+    
+    page.save()
+    frappe.db.commit()
+    
+    return {"name": page.name, "title": page.title, "visibility": page.visibility}
+
+@frappe.whitelist()
+def update_workspace_settings(name: str, title: str = None, description: str = None, visibility: str = None, collaborators=None):
+    """Update workspace settings including title, description, visibility, and collaborators."""
+    # Check if workspace exists and user has access
+    workspace = frappe.get_doc("Workbench Workspace", name)
+    if not has_workspace_access(workspace, frappe.session.user, write=True):
+        frappe.throw("You don't have permission to update this workspace")
+    
+    # Update title if provided
+    if title is not None:
+        workspace.title = title or "Untitled"
+    
+    # Update description if provided
+    if description is not None:
+        workspace.description = description
+    
+    # Update visibility if provided
+    if visibility is not None:
+        workspace.visibility = visibility
+    
+    # Handle collaborators
+    if collaborators is not None:
+        if isinstance(collaborators, str):
+            try:
+                collaborators = frappe.parse_json(collaborators)
+            except Exception:
+                collaborators = None
+        
+        # Clear existing collaborators
+        workspace.collaborators = []
+        
+        if collaborators:
+            for c in collaborators:
+                if isinstance(c, dict):
+                    user_id = c.get("user")
+                    access = c.get("access", "Viewer")
+                elif isinstance(c, str):
+                    user_id = c
+                    access = "Viewer"
+                else:
+                    continue
+                    
+                if not frappe.db.exists("User", user_id):
+                    frappe.throw(f"User {user_id} does not exist")
+                workspace.append("collaborators", {
+                    "user": user_id,
+                    "access": access,
+                })
+    
+    workspace.save()
+    frappe.db.commit()
+    
+    return {"name": workspace.name, "title": workspace.title, "visibility": workspace.visibility}
+
+@frappe.whitelist()
+def get_workspace(name: str):
+    """Get workspace details including collaborators."""
+    workspace = frappe.get_doc("Workbench Workspace", name)
+    if not has_workspace_access(workspace, frappe.session.user, write=False):
+        frappe.throw("You don't have permission to view this workspace")
+    
+    # Get collaborators
+    collaborators = frappe.get_all(
+        "Workbench Workspace Collaborator",
+        filters={"parent": name},
+        fields=["user", "access"]
+    )
+    
+    return {
+        "name": workspace.name,
+        "title": workspace.title,
+        "description": workspace.description,
+        "visibility": workspace.visibility,
+        "company": workspace.company,
+        "collaborators": collaborators
+    }
 
 @frappe.whitelist()
 def update_page(name: str, title: str = None, content_json: str = None):
@@ -470,48 +650,6 @@ def get_workspace_settings(workspace_name: str):
         ]
     }
 
-@frappe.whitelist()
-def update_workspace_settings(workspace_name: str, title: str = None, description: str = None, visibility: str = None, company: str = None, collaborators=None):
-    """Update workspace settings (owner only)."""
-    ws = frappe.get_doc("Workbench Workspace", workspace_name)
-    
-    # Only owner can update settings
-    if ws.owner_user != frappe.session.user:
-        frappe.throw("Only the workspace owner can update settings")
-    
-    if title is not None:
-        ws.title = title
-    if description is not None:
-        ws.description = description
-    if visibility is not None:
-        ws.visibility = visibility
-    if company is not None:
-        ws.company = company
-    
-    if collaborators is not None:
-        if isinstance(collaborators, str):
-            try:
-                collaborators = frappe.parse_json(collaborators)
-            except Exception:
-                collaborators = None
-        
-        # Clear existing collaborators
-        ws.collaborators = []
-        
-        if collaborators:
-            for c in collaborators:
-                user_id = c.get("user")
-                if not frappe.db.exists("User", user_id):
-                    frappe.throw(f"User {user_id} does not exist")
-                ws.append("collaborators", {
-                    "user": user_id,
-                    "access": c.get("access", "Viewer"),
-                })
-    
-    ws.save()
-    frappe.db.commit()
-    
-    return {"ok": True}
 
     # helpers
     import uuid

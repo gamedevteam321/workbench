@@ -17,23 +17,10 @@ console.log('HTML template loaded');
       <div class="wb-logo">Workbench</div>
       <div class="wb-topbar-actions">
         <button id="wb-new-workspace" class="wb-btn ghost" title="New Workspace">+</button>
-        <button id="wb-new-page" class="wb-btn">+ New</button>
       </div>
     </div>
     
     <div class="wb-sidebar-content">
-      <div class="wb-section">
-        <div class="wb-section-header">
-          <span class="wb-section-title">Private</span>
-        </div>
-        <div class="wb-section-content">
-          <div class="wb-new-page-item">
-            <span class="wb-new-page-icon">📄</span>
-            <span class="wb-new-page-text">New page</span>
-          </div>
-          <div id="wb-private-pages" class="wb-page-list"></div>
-        </div>
-      </div>
       
       <div class="wb-section">
         <div class="wb-section-header">
@@ -57,7 +44,6 @@ console.log('HTML template loaded');
   <main class="wb-main">
     <div class="wb-page-header">
       <div class="wb-breadcrumbs">
-        <button id="wb-back" class="wb-iconbtn" title="Back">←</button>
         <span id="wb-crumb-title">New page</span>
         <span class="wb-badge">Private</span>
       </div>
@@ -1476,7 +1462,233 @@ function createNotionWorkbench() {
     saveTimeout = setTimeout(saveContent, 2000); // Save after 2 seconds of inactivity
   }
   
-  // Create a new page
+  // Show page creation dialog with visibility options
+  function showCreatePageDialog(workspace = null) {
+    const dialog = document.createElement('div');
+    dialog.className = 'wb-dialog-overlay';
+    dialog.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+    `;
+    
+    dialog.innerHTML = `
+      <div class="wb-dialog" style="
+        background: white;
+        border-radius: 8px;
+        padding: 24px;
+        min-width: 400px;
+        max-width: 500px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      ">
+        <h3 style="margin: 0 0 20px 0; font-size: 18px; font-weight: 600;">Create New Page</h3>
+        
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 500;">Page Title</label>
+          <input type="text" id="page-title-input" placeholder="Enter page title" style="
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+          " value="New Page">
+        </div>
+        
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 500;">Visibility</label>
+          <select id="page-visibility-select" style="
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+          ">
+            <option value="Private">Private (Only you)</option>
+            <option value="Company">Public (All company employees)</option>
+            <option value="Specific Users">Specific Users</option>
+          </select>
+        </div>
+        
+        <div id="specific-users-section" style="margin-bottom: 16px; display: none;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 500;">Select Users</label>
+          <div id="user-selection" style="
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 8px;
+          ">
+            <div style="text-align: center; color: #666; padding: 20px;">
+              Loading users...
+            </div>
+          </div>
+        </div>
+        
+        <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px;">
+          <button id="cancel-page-btn" style="
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+          ">Cancel</button>
+          <button id="create-page-btn" style="
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+          ">Create Page</button>
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(dialog);
+    
+    // Focus on title input
+    const titleInput = dialog.querySelector('#page-title-input');
+    titleInput.focus();
+    titleInput.select();
+    
+    // Handle visibility change
+    const visibilitySelect = dialog.querySelector('#page-visibility-select');
+    const specificUsersSection = dialog.querySelector('#specific-users-section');
+    
+    visibilitySelect.addEventListener('change', () => {
+      if (visibilitySelect.value === 'Specific Users') {
+        specificUsersSection.style.display = 'block';
+        loadUsersForSelection(dialog.querySelector('#user-selection'));
+      } else {
+        specificUsersSection.style.display = 'none';
+      }
+    });
+    
+    // Handle cancel
+    dialog.querySelector('#cancel-page-btn').addEventListener('click', () => {
+      document.body.removeChild(dialog);
+    });
+    
+    // Handle create
+    dialog.querySelector('#create-page-btn').addEventListener('click', () => {
+      const title = titleInput.value.trim() || 'New Page';
+      const visibility = visibilitySelect.value;
+      const selectedUsers = getSelectedUsers(dialog.querySelector('#user-selection'));
+      
+      document.body.removeChild(dialog);
+      createNewPageWithVisibility(title, workspace, visibility, selectedUsers);
+    });
+    
+    // Close on overlay click
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) {
+        document.body.removeChild(dialog);
+      }
+    });
+  }
+  
+  // Load users for selection
+  function loadUsersForSelection(container) {
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    fetch('/api/method/workbench.api.get_company_users', {
+      method: 'GET',
+      headers: {
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      }
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        container.innerHTML = '';
+        data.message.forEach(user => {
+          const userItem = document.createElement('div');
+          userItem.style.cssText = `
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 4px;
+          `;
+          userItem.innerHTML = `
+            <input type="checkbox" id="user-${user.name}" value="${user.name}" style="margin-right: 8px;">
+            <label for="user-${user.name}" style="cursor: pointer; flex: 1;">
+              ${user.full_name || user.name}
+            </label>
+          `;
+          container.appendChild(userItem);
+        });
+      } else {
+        container.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">No users found</div>';
+      }
+    })
+    .catch(error => {
+      console.error('Error loading users:', error);
+      container.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">Error loading users</div>';
+    });
+  }
+  
+  // Get selected users
+  function getSelectedUsers(container) {
+    const checkboxes = container.querySelectorAll('input[type="checkbox"]:checked');
+    return Array.from(checkboxes).map(cb => cb.value);
+  }
+  
+  // Create page with visibility options
+  function createNewPageWithVisibility(title, workspace, visibility, specificUsers) {
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    const targetWorkspace = workspace || currentWorkspace;
+    if (!targetWorkspace) {
+      console.error('No workspace selected for page creation');
+      return;
+    }
+    
+    fetch('/api/method/workbench.api.create_page', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      },
+      body: JSON.stringify({
+        workspace: targetWorkspace,
+        title: title,
+        content_json: null,
+        visibility: visibility,
+        company: null,
+        collaborators: specificUsers.map(user => ({ user: user, access: "Viewer" }))
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        currentPageName = data.message.name;
+        document.getElementById('wb-title').value = data.message.title;
+        console.log('New page created:', data.message);
+        refreshSlashMenu();
+        
+        // Pages section removed
+        
+        // Refresh workspace pages if created in a workspace
+        if (targetWorkspace) {
+          refreshWorkspacePages(targetWorkspace);
+        }
+      }
+    })
+    .catch(error => {
+      console.error('Error creating page:', error);
+    });
+  }
+
+  // Create a new page (legacy function for backward compatibility)
   function createNewPage(title = 'New Page', workspace = null) {
     const csrfToken = window.csrf_token || 
                      (window.frappe && window.frappe.csrf_token);
@@ -1510,10 +1722,7 @@ function createNotionWorkbench() {
         console.log('New page created:', data.message);
         refreshSlashMenu();
         
-        // Reload pages list
-        if (currentWorkspace) {
-          loadPages();
-        }
+        // Pages section removed
         
         // Refresh workspace pages if created in a workspace
         if (targetWorkspace) {
@@ -1563,7 +1772,7 @@ function createNotionWorkbench() {
         populateWorkspaceList(data.message);
         if (data.message.length > 0 && !currentWorkspace) {
           currentWorkspace = data.message[0].name;
-          loadPages();
+          // Pages section removed
         }
       }
     })
@@ -1631,10 +1840,7 @@ function createNotionWorkbench() {
       const newPageItem = workspaceItem.querySelector('.wb-workspace-new-page');
       newPageItem.addEventListener('click', (e) => {
         e.stopPropagation();
-        const title = prompt('Page name:', 'New Page');
-        if (title) {
-          createNewPage(title, workspace.name);
-        }
+        showCreatePageDialog(workspace.name);
       });
       
       workspaceList.appendChild(workspaceItem);
@@ -1643,45 +1849,181 @@ function createNotionWorkbench() {
   
   function setupWorkspaceEventListeners() {
     const newWorkspaceBtn = document.getElementById('wb-new-workspace');
-    const newPageBtn = document.getElementById('wb-new-page');
-    const newPageItem = document.querySelector('.wb-new-page-item');
     const addWorkspaceItem = document.querySelector('.wb-add-workspace-item');
     
     if (newWorkspaceBtn) {
       newWorkspaceBtn.addEventListener('click', () => {
-        const title = prompt('Workspace name:', 'New Workspace');
-        if (title) {
-          createNewWorkspace(title);
-        }
+        showCreateWorkspaceDialog();
       });
     }
     
     if (addWorkspaceItem) {
       addWorkspaceItem.addEventListener('click', () => {
-        const title = prompt('Workspace name:', 'New Workspace');
-        if (title) {
-          createNewWorkspace(title);
-        }
+        showCreateWorkspaceDialog();
       });
     }
+  }
+  
+  // Show workspace creation dialog with visibility options
+  function showCreateWorkspaceDialog() {
+    const dialog = document.createElement('div');
+    dialog.className = 'wb-dialog-overlay';
+    dialog.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+    `;
     
-    if (newPageBtn) {
-      newPageBtn.addEventListener('click', () => {
-        const title = prompt('Page name:', 'New Page');
-        if (title) {
-          createNewPage(title, currentWorkspace);
-        }
-      });
-    }
+    dialog.innerHTML = `
+      <div class="wb-dialog" style="
+        background: white;
+        border-radius: 8px;
+        padding: 24px;
+        min-width: 400px;
+        max-width: 500px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      ">
+        <h3 style="margin: 0 0 20px 0; font-size: 18px; font-weight: 600;">Create New Workspace</h3>
+        
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 500;">Workspace Title</label>
+          <input type="text" id="workspace-title-input" placeholder="Enter workspace title" style="
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+          " value="New Workspace">
+        </div>
+        
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 500;">Visibility</label>
+          <select id="workspace-visibility-select" style="
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+          ">
+            <option value="Private">Private (Only you)</option>
+            <option value="Company">Public (All company employees)</option>
+            <option value="Specific Users">Specific Users</option>
+          </select>
+        </div>
+        
+        <div id="workspace-specific-users-section" style="margin-bottom: 16px; display: none;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 500;">Select Users</label>
+          <div id="workspace-user-selection" style="
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 8px;
+          ">
+            <div style="text-align: center; color: #666; padding: 20px;">
+              Loading users...
+            </div>
+          </div>
+        </div>
+        
+        <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px;">
+          <button id="cancel-workspace-btn" style="
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+          ">Cancel</button>
+          <button id="create-workspace-btn" style="
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+          ">Create Workspace</button>
+        </div>
+      </div>
+    `;
     
-    if (newPageItem) {
-      newPageItem.addEventListener('click', () => {
-        const title = prompt('Page name:', 'New Page');
-        if (title) {
-          createNewPage(title, currentWorkspace);
-        }
-      });
-    }
+    document.body.appendChild(dialog);
+    
+    // Focus on title input
+    const titleInput = dialog.querySelector('#workspace-title-input');
+    titleInput.focus();
+    titleInput.select();
+    
+    // Handle visibility change
+    const visibilitySelect = dialog.querySelector('#workspace-visibility-select');
+    const specificUsersSection = dialog.querySelector('#workspace-specific-users-section');
+    
+    visibilitySelect.addEventListener('change', () => {
+      if (visibilitySelect.value === 'Specific Users') {
+        specificUsersSection.style.display = 'block';
+        loadUsersForSelection(dialog.querySelector('#workspace-user-selection'));
+      } else {
+        specificUsersSection.style.display = 'none';
+      }
+    });
+    
+    // Handle cancel
+    dialog.querySelector('#cancel-workspace-btn').addEventListener('click', () => {
+      document.body.removeChild(dialog);
+    });
+    
+    // Handle create
+    dialog.querySelector('#create-workspace-btn').addEventListener('click', () => {
+      const title = titleInput.value.trim() || 'New Workspace';
+      const visibility = visibilitySelect.value;
+      const selectedUsers = getSelectedUsers(dialog.querySelector('#workspace-user-selection'));
+      
+      document.body.removeChild(dialog);
+      createNewWorkspaceWithVisibility(title, visibility, selectedUsers);
+    });
+    
+    // Close on overlay click
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) {
+        document.body.removeChild(dialog);
+      }
+    });
+  }
+  
+  // Create workspace with visibility options
+  function createNewWorkspaceWithVisibility(title, visibility, specificUsers) {
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    fetch('/api/method/workbench.api.create_workspace', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      },
+      body: JSON.stringify({
+        title: title,
+        description: '',
+        visibility: visibility,
+        company: null,
+        collaborators: specificUsers.map(user => ({ user: user, access: "Viewer" }))
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        console.log('New workspace created:', data.message);
+        loadWorkspaces();
+      }
+    })
+    .catch(error => {
+      console.error('Error creating workspace:', error);
+    });
   }
   
   function createNewWorkspace(title) {
@@ -1716,34 +2058,6 @@ function createNotionWorkbench() {
     });
   }
   
-  function loadPages() {
-    if (!currentWorkspace) {
-      console.log('No current workspace, cannot load pages');
-      return;
-    }
-    
-    console.log('Loading pages for workspace:', currentWorkspace);
-    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
-    
-    fetch(`/api/method/workbench.api.get_workspace_pages?workspace=${currentWorkspace}`, {
-      method: 'GET',
-      headers: {
-        'X-Frappe-CSRF-Token': csrfToken || 'token'
-      }
-    })
-    .then(response => response.json())
-    .then(data => {
-      if (data.message) {
-        console.log('Pages loaded:', data.message);
-        populatePageList(data.message);
-      } else {
-        console.log('No pages data received');
-      }
-    })
-    .catch(error => {
-      console.error('Error loading pages:', error);
-    });
-  }
   
   function loadWorkspacePages(workspaceName, container) {
     const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
@@ -1779,25 +2093,6 @@ function createNotionWorkbench() {
     }
   }
   
-  function populatePageList(pages) {
-    console.log('populatePageList called with pages:', pages);
-    
-    // Update private pages section
-    const privatePageList = document.getElementById('wb-private-pages');
-    if (privatePageList) {
-      console.log('Updating private pages list');
-      privatePageList.innerHTML = '';
-      pages.forEach(page => {
-        const pageItem = createPageItem(page);
-        privatePageList.appendChild(pageItem);
-      });
-    } else {
-      console.log('Private pages list not found');
-    }
-    
-    // Also refresh the current workspace if it's expanded
-    refreshCurrentWorkspace();
-  }
   
   function refreshCurrentWorkspace() {
     if (!currentWorkspace) {
@@ -1990,6 +2285,7 @@ function createNotionWorkbench() {
     `;
     
     const menuItems = [
+      { icon: '⚙️', name: 'Settings', action: () => showWorkspaceSettingsDialog(workspace) },
       { icon: '✏️', name: 'Rename workspace', action: () => renameWorkspace(workspace) },
       { icon: '🗑️', name: 'Delete workspace & all pages', action: () => deleteWorkspace(workspace) }
     ];
@@ -2026,6 +2322,269 @@ function createNotionWorkbench() {
     setTimeout(() => {
       document.addEventListener('click', closeMenu);
     }, 100);
+  }
+  
+  // Show workspace settings dialog
+  function showWorkspaceSettingsDialog(workspace) {
+    const dialog = document.createElement('div');
+    dialog.className = 'wb-dialog-overlay';
+    dialog.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+    `;
+    
+    dialog.innerHTML = `
+      <div class="wb-dialog" style="
+        background: white;
+        border-radius: 8px;
+        padding: 24px;
+        min-width: 400px;
+        max-width: 500px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      ">
+        <h3 style="margin: 0 0 20px 0; font-size: 18px; font-weight: 600;">Workspace Settings</h3>
+        
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 500;">Workspace Title</label>
+          <input type="text" id="workspace-settings-title" value="${workspace.title}" style="
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+          ">
+        </div>
+        
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 500;">Description</label>
+          <textarea id="workspace-settings-description" placeholder="Enter workspace description" style="
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            min-height: 60px;
+            resize: vertical;
+          ">${workspace.description || ''}</textarea>
+        </div>
+        
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 500;">Visibility</label>
+          <select id="workspace-settings-visibility" style="
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+          ">
+            <option value="Private">Private (Only you)</option>
+            <option value="Company">Public (All company employees)</option>
+            <option value="Specific Users">Specific Users</option>
+          </select>
+        </div>
+        
+        <div id="workspace-settings-specific-users-section" style="margin-bottom: 16px; display: none;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 500;">Collaborators</label>
+          <div id="workspace-settings-user-selection" style="
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 8px;
+          ">
+            <div style="text-align: center; color: #666; padding: 20px;">
+              Loading users...
+            </div>
+          </div>
+        </div>
+        
+        <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px;">
+          <button id="cancel-workspace-settings-btn" style="
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+          ">Cancel</button>
+          <button id="save-workspace-settings-btn" style="
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+          ">Save Changes</button>
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(dialog);
+    
+    // Load current workspace data
+    loadWorkspaceSettingsData(workspace, dialog);
+    
+    // Handle visibility change
+    const visibilitySelect = dialog.querySelector('#workspace-settings-visibility');
+    const specificUsersSection = dialog.querySelector('#workspace-settings-specific-users-section');
+    
+    visibilitySelect.addEventListener('change', () => {
+      if (visibilitySelect.value === 'Specific Users') {
+        specificUsersSection.style.display = 'block';
+        loadUsersForSelection(dialog.querySelector('#workspace-settings-user-selection'));
+      } else {
+        specificUsersSection.style.display = 'none';
+      }
+    });
+    
+    // Handle cancel
+    dialog.querySelector('#cancel-workspace-settings-btn').addEventListener('click', () => {
+      document.body.removeChild(dialog);
+    });
+    
+    // Handle save
+    dialog.querySelector('#save-workspace-settings-btn').addEventListener('click', () => {
+      const title = dialog.querySelector('#workspace-settings-title').value.trim();
+      const description = dialog.querySelector('#workspace-settings-description').value.trim();
+      const visibility = visibilitySelect.value;
+      const selectedUsers = getSelectedUsers(dialog.querySelector('#workspace-settings-user-selection'));
+      
+      document.body.removeChild(dialog);
+      updateWorkspaceSettings(workspace, title, description, visibility, selectedUsers);
+    });
+    
+    // Close on overlay click
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) {
+        document.body.removeChild(dialog);
+      }
+    });
+  }
+  
+  // Load workspace settings data
+  function loadWorkspaceSettingsData(workspace, dialog) {
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    fetch(`/api/method/workbench.api.get_workspace?name=${workspace.name}`, {
+      method: 'GET',
+      headers: {
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      }
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        const workspaceData = data.message;
+        
+        // Set current values
+        dialog.querySelector('#workspace-settings-title').value = workspaceData.title || workspace.title;
+        dialog.querySelector('#workspace-settings-description').value = workspaceData.description || '';
+        
+        const visibilitySelect = dialog.querySelector('#workspace-settings-visibility');
+        visibilitySelect.value = workspaceData.visibility || 'Private';
+        
+        // Load collaborators if specific users
+        if (workspaceData.visibility === 'Specific Users') {
+          const specificUsersSection = dialog.querySelector('#workspace-settings-specific-users-section');
+          specificUsersSection.style.display = 'block';
+          loadWorkspaceCollaborators(workspaceData, dialog.querySelector('#workspace-settings-user-selection'));
+        }
+      }
+    })
+    .catch(error => {
+      console.error('Error loading workspace data:', error);
+    });
+  }
+  
+  // Load workspace collaborators
+  function loadWorkspaceCollaborators(workspaceData, container) {
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    // First load all company users
+    fetch('/api/method/workbench.api.get_company_users', {
+      method: 'GET',
+      headers: {
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      }
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        container.innerHTML = '';
+        const currentCollaborators = workspaceData.collaborators || [];
+        const collaboratorEmails = currentCollaborators.map(c => c.user);
+        
+        data.message.forEach(user => {
+          const userItem = document.createElement('div');
+          userItem.style.cssText = `
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 4px;
+          `;
+          
+          const isSelected = collaboratorEmails.includes(user.name);
+          userItem.innerHTML = `
+            <input type="checkbox" id="workspace-user-${user.name}" value="${user.name}" ${isSelected ? 'checked' : ''} style="margin-right: 8px;">
+            <label for="workspace-user-${user.name}" style="cursor: pointer; flex: 1;">
+              ${user.full_name || user.name}
+            </label>
+          `;
+          container.appendChild(userItem);
+        });
+      } else {
+        container.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">No users found</div>';
+      }
+    })
+    .catch(error => {
+      console.error('Error loading users:', error);
+      container.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">Error loading users</div>';
+    });
+  }
+  
+  // Update workspace settings
+  function updateWorkspaceSettings(workspace, title, description, visibility, selectedUsers) {
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    fetch('/api/method/workbench.api.update_workspace_settings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      },
+      body: JSON.stringify({
+        name: workspace.name,
+        title: title,
+        description: description,
+        visibility: visibility,
+        collaborators: selectedUsers.map(user => ({ user: user, access: "Viewer" }))
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        console.log('Workspace settings updated:', data.message);
+        
+        // Reload workspaces list
+        loadWorkspaces();
+      } else {
+        console.error('Failed to update workspace settings:', data);
+        alert('Failed to update workspace settings');
+      }
+    })
+    .catch(error => {
+      console.error('Error updating workspace settings:', error);
+      alert('Error updating workspace settings: ' + error.message);
+    });
   }
   
   // Rename workspace
@@ -2198,6 +2757,7 @@ function createNotionWorkbench() {
     `;
     
     const menuItems = [
+      { icon: '⚙️', name: 'Settings', action: () => showPageSettingsDialog(page) },
       { icon: '📤', name: 'Move to workspace', action: () => showMoveToWorkspaceDialog(page) },
       { icon: '📋', name: 'Duplicate', action: () => duplicatePage(page) },
       { icon: '🗑️', name: 'Delete', action: () => deletePage(page) }
@@ -2291,7 +2851,7 @@ function createNotionWorkbench() {
     .then(data => {
       if (data.message && data.message.ok) {
         console.log('Page moved successfully');
-        loadPages(); // Reload pages list
+        // Pages section removed
       } else {
         console.error('Move failed:', data.message?.error || data);
         alert('Failed to move page: ' + (data.message?.error || 'Unknown error'));
@@ -2300,6 +2860,255 @@ function createNotionWorkbench() {
     .catch(error => {
       console.error('Move error:', error);
       alert('Error moving page: ' + error.message);
+    });
+  }
+  
+  // Show page settings dialog
+  function showPageSettingsDialog(page) {
+    const dialog = document.createElement('div');
+    dialog.className = 'wb-dialog-overlay';
+    dialog.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+    `;
+    
+    dialog.innerHTML = `
+      <div class="wb-dialog" style="
+        background: white;
+        border-radius: 8px;
+        padding: 24px;
+        min-width: 400px;
+        max-width: 500px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      ">
+        <h3 style="margin: 0 0 20px 0; font-size: 18px; font-weight: 600;">Page Settings</h3>
+        
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 500;">Page Title</label>
+          <input type="text" id="page-settings-title" value="${page.title}" style="
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+          ">
+        </div>
+        
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 500;">Visibility</label>
+          <select id="page-settings-visibility" style="
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+          ">
+            <option value="Private">Private (Only you)</option>
+            <option value="Company">Public (All company employees)</option>
+            <option value="Specific Users">Specific Users</option>
+          </select>
+        </div>
+        
+        <div id="page-settings-specific-users-section" style="margin-bottom: 16px; display: none;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 500;">Collaborators</label>
+          <div id="page-settings-user-selection" style="
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 8px;
+          ">
+            <div style="text-align: center; color: #666; padding: 20px;">
+              Loading users...
+            </div>
+          </div>
+        </div>
+        
+        <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px;">
+          <button id="cancel-page-settings-btn" style="
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+          ">Cancel</button>
+          <button id="save-page-settings-btn" style="
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+          ">Save Changes</button>
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(dialog);
+    
+    // Load current page data
+    loadPageSettingsData(page, dialog);
+    
+    // Handle visibility change
+    const visibilitySelect = dialog.querySelector('#page-settings-visibility');
+    const specificUsersSection = dialog.querySelector('#page-settings-specific-users-section');
+    
+    visibilitySelect.addEventListener('change', () => {
+      if (visibilitySelect.value === 'Specific Users') {
+        specificUsersSection.style.display = 'block';
+        loadUsersForSelection(dialog.querySelector('#page-settings-user-selection'));
+      } else {
+        specificUsersSection.style.display = 'none';
+      }
+    });
+    
+    // Handle cancel
+    dialog.querySelector('#cancel-page-settings-btn').addEventListener('click', () => {
+      document.body.removeChild(dialog);
+    });
+    
+    // Handle save
+    dialog.querySelector('#save-page-settings-btn').addEventListener('click', () => {
+      const title = dialog.querySelector('#page-settings-title').value.trim();
+      const visibility = visibilitySelect.value;
+      const selectedUsers = getSelectedUsers(dialog.querySelector('#page-settings-user-selection'));
+      
+      document.body.removeChild(dialog);
+      updatePageSettings(page, title, visibility, selectedUsers);
+    });
+    
+    // Close on overlay click
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) {
+        document.body.removeChild(dialog);
+      }
+    });
+  }
+  
+  // Load page settings data
+  function loadPageSettingsData(page, dialog) {
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    fetch(`/api/method/workbench.api.get_page?name=${page.name}`, {
+      method: 'GET',
+      headers: {
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      }
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        const pageData = data.message;
+        
+        // Set current visibility
+        const visibilitySelect = dialog.querySelector('#page-settings-visibility');
+        visibilitySelect.value = pageData.visibility || 'Private';
+        
+        // Load collaborators if specific users
+        if (pageData.visibility === 'Specific Users') {
+          const specificUsersSection = dialog.querySelector('#page-settings-specific-users-section');
+          specificUsersSection.style.display = 'block';
+          loadPageCollaborators(pageData, dialog.querySelector('#page-settings-user-selection'));
+        }
+      }
+    })
+    .catch(error => {
+      console.error('Error loading page data:', error);
+    });
+  }
+  
+  // Load page collaborators
+  function loadPageCollaborators(pageData, container) {
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    // First load all company users
+    fetch('/api/method/workbench.api.get_company_users', {
+      method: 'GET',
+      headers: {
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      }
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        container.innerHTML = '';
+        const currentCollaborators = pageData.collaborators || [];
+        const collaboratorEmails = currentCollaborators.map(c => c.user);
+        
+        data.message.forEach(user => {
+          const userItem = document.createElement('div');
+          userItem.style.cssText = `
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 4px;
+          `;
+          
+          const isSelected = collaboratorEmails.includes(user.name);
+          userItem.innerHTML = `
+            <input type="checkbox" id="page-user-${user.name}" value="${user.name}" ${isSelected ? 'checked' : ''} style="margin-right: 8px;">
+            <label for="page-user-${user.name}" style="cursor: pointer; flex: 1;">
+              ${user.full_name || user.name}
+            </label>
+          `;
+          container.appendChild(userItem);
+        });
+      } else {
+        container.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">No users found</div>';
+      }
+    })
+    .catch(error => {
+      console.error('Error loading users:', error);
+      container.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">Error loading users</div>';
+    });
+  }
+  
+  // Update page settings
+  function updatePageSettings(page, title, visibility, selectedUsers) {
+    const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+    
+    fetch('/api/method/workbench.api.update_page_settings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Frappe-CSRF-Token': csrfToken || 'token'
+      },
+      body: JSON.stringify({
+        name: page.name,
+        title: title,
+        visibility: visibility,
+        collaborators: selectedUsers.map(user => ({ user: user, access: "Viewer" }))
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        console.log('Page settings updated:', data.message);
+        
+        // Update current page title if it's the same page
+        if (currentPageName === page.name) {
+          document.getElementById('wb-title').value = title;
+        }
+        
+        // Pages section removed
+      } else {
+        console.error('Failed to update page settings:', data);
+        alert('Failed to update page settings');
+      }
+    })
+    .catch(error => {
+      console.error('Error updating page settings:', error);
+      alert('Error updating page settings: ' + error.message);
     });
   }
   
@@ -2360,8 +3169,7 @@ function createNotionWorkbench() {
                   currentPageName = null;
                 }
                 
-                // Reload pages list
-                loadPages();
+                // Pages section removed
                 
                 // Also refresh current workspace
                 refreshCurrentWorkspace();
@@ -2479,6 +3287,151 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 <style>
+/* Dialog Styles */
+.wb-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.wb-dialog {
+  background: white;
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 400px;
+  max-width: 500px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  animation: dialogSlideIn 0.2s ease-out;
+}
+
+@keyframes dialogSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.wb-dialog h3 {
+  margin: 0 0 20px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+}
+
+.wb-dialog label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #555;
+}
+
+.wb-dialog input,
+.wb-dialog select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+.wb-dialog input:focus,
+.wb-dialog select:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.wb-dialog button {
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.wb-dialog button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.wb-dialog #cancel-workspace-btn,
+.wb-dialog #cancel-page-btn {
+  border: 1px solid #ddd;
+  background: white;
+  color: #666;
+}
+
+.wb-dialog #cancel-workspace-btn:hover,
+.wb-dialog #cancel-page-btn:hover {
+  background: #f8f9fa;
+  border-color: #ccc;
+}
+
+.wb-dialog #create-workspace-btn,
+.wb-dialog #create-page-btn {
+  background: #007bff;
+  color: white;
+  border: none;
+}
+
+.wb-dialog #create-workspace-btn:hover,
+.wb-dialog #create-page-btn:hover {
+  background: #0056b3;
+}
+
+/* User selection styles */
+#user-selection,
+#workspace-user-selection {
+  max-height: 150px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px;
+  background: #f8f9fa;
+}
+
+#user-selection div,
+#workspace-user-selection div {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-bottom: 4px;
+  transition: background-color 0.2s;
+}
+
+#user-selection div:hover,
+#workspace-user-selection div:hover {
+  background: #e9ecef;
+}
+
+#user-selection input[type="checkbox"],
+#workspace-user-selection input[type="checkbox"] {
+  margin-right: 8px;
+  width: auto;
+}
+
+#user-selection label,
+#workspace-user-selection label {
+  cursor: pointer;
+  flex: 1;
+  margin: 0;
+  font-weight: normal;
+}
+
 /* Main Layout Styles */
 #wb-app {
   display: flex;
@@ -3762,3 +4715,4 @@ document.addEventListener('DOMContentLoaded', function() {
 }
 </style>
 {% endblock %}
+
