@@ -62,8 +62,7 @@ console.log('HTML template loaded');
         <span class="wb-badge">Private</span>
       </div>
       <div class="wb-actions">
-        <button id="wb-theme" class="wb-btn ghost" title="Toggle theme">☼</button>
-        <button id="wb-delete" class="wb-btn danger">Delete</button>
+        <!-- Theme and delete buttons removed -->
       </div>
     </div>
 
@@ -77,6 +76,156 @@ console.log('HTML template loaded');
 
 <script>
 console.log('Starting Notion-style workbench...');
+
+// Global variables for page and workspace management
+let currentWorkspace = null;
+let currentPageName = null;
+
+// Helper function to refresh the pages list
+function refreshPagesList() {
+  if (!currentWorkspace) return;
+  
+  const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+  
+  fetch(`/api/method/workbench.api.get_workspace_pages?workspace=${currentWorkspace}`, {
+    method: 'GET',
+    headers: {
+      'X-Frappe-CSRF-Token': csrfToken || 'token'
+    }
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.message) {
+      const pages = data.message;
+      const pagesContainer = document.querySelector('.wb-pages-list');
+      
+      if (pagesContainer) {
+        // Clear existing pages
+        pagesContainer.innerHTML = '';
+        
+        // Add each page
+        pages.forEach(page => {
+          const pageItem = document.createElement('div');
+          pageItem.className = 'wb-page-item';
+          pageItem.innerHTML = `
+            <div class="wb-page-content">
+              <div class="wb-page-icon">📄</div>
+              <div class="wb-page-info">
+                <div class="wb-page-title">${page.title}</div>
+                <div class="wb-page-meta">${formatDate(page.last_edited_date)}</div>
+              </div>
+              <button class="wb-page-menu-btn" title="Page options">⋯</button>
+            </div>
+          `;
+          
+          // Add click handler
+          pageItem.querySelector('.wb-page-content').addEventListener('click', () => {
+            loadPage(page.name);
+          });
+          
+          pagesContainer.appendChild(pageItem);
+        });
+        
+        // Show empty state if no pages
+        if (pages.length === 0) {
+          pagesContainer.innerHTML = '<div class="wb-empty-pages">No pages yet</div>';
+        }
+      }
+    }
+  })
+  .catch(error => {
+    console.error('Error refreshing pages list:', error);
+  });
+}
+
+// Helper function to format date
+function formatDate(dateString) {
+  if (!dateString) return 'Just now';
+  
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  
+  return date.toLocaleDateString();
+}
+
+// Helper function to create a new empty page
+function createNewEmptyPage() {
+  // Create a new empty page in the current workspace
+  const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+  
+  fetch('/api/method/workbench.api.create_page', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Frappe-CSRF-Token': csrfToken || 'token'
+    },
+    body: JSON.stringify({
+      title: 'New Page',
+      workspace: currentWorkspace
+    })
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.message) {
+      currentPageName = data.message.name;
+      document.getElementById('wb-title').value = data.message.title;
+      document.getElementById('wb-crumb-title').textContent = data.message.title;
+      
+      // Add the new page to the UI
+      addPageToUI(data.message);
+      
+      console.log('New empty page created:', data.message);
+    }
+  })
+  .catch(error => {
+    console.error('Error creating new page:', error);
+  });
+}
+
+// Helper function to add page to UI
+function addPageToUI(page) {
+  const pagesContainer = document.querySelector('.wb-pages-list');
+  if (!pagesContainer) return;
+  
+  // Remove empty state if it exists
+  const emptyState = pagesContainer.querySelector('.wb-empty-pages');
+  if (emptyState) {
+    emptyState.remove();
+  }
+  
+  // Create page item
+  const pageItem = document.createElement('div');
+  pageItem.className = 'wb-page-item active';
+  pageItem.innerHTML = `
+    <div class="wb-page-content">
+      <div class="wb-page-icon">📄</div>
+      <div class="wb-page-info">
+        <div class="wb-page-title">${page.title}</div>
+        <div class="wb-page-meta">Just now</div>
+      </div>
+      <button class="wb-page-menu-btn" title="Page options">⋯</button>
+    </div>
+  `;
+  
+  // Add click handler
+  pageItem.querySelector('.wb-page-content').addEventListener('click', () => {
+    loadPage(page.name);
+  });
+  
+  // Add to container
+  pagesContainer.appendChild(pageItem);
+}
+
+// Theme toggle and delete page functionality removed
 
 // Notion-style block editor
 function createNotionWorkbench() {
@@ -1388,9 +1537,7 @@ function createNotionWorkbench() {
     }
   }
   
-  // Workspace and page management
-  let currentWorkspace = null;
-  let currentPageName = null;
+  // Workspace and page management (variables are now global)
   
   // Initialize workspace and page management
   initializeWorkspaceManagement();
@@ -1570,8 +1717,12 @@ function createNotionWorkbench() {
   }
   
   function loadPages() {
-    if (!currentWorkspace) return;
+    if (!currentWorkspace) {
+      console.log('No current workspace, cannot load pages');
+      return;
+    }
     
+    console.log('Loading pages for workspace:', currentWorkspace);
     const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
     
     fetch(`/api/method/workbench.api.get_workspace_pages?workspace=${currentWorkspace}`, {
@@ -1583,7 +1734,10 @@ function createNotionWorkbench() {
     .then(response => response.json())
     .then(data => {
       if (data.message) {
+        console.log('Pages loaded:', data.message);
         populatePageList(data.message);
+      } else {
+        console.log('No pages data received');
       }
     })
     .catch(error => {
@@ -1626,14 +1780,79 @@ function createNotionWorkbench() {
   }
   
   function populatePageList(pages) {
-    const pageList = document.getElementById('wb-private-pages');
-    if (!pageList) return;
-    pageList.innerHTML = '';
+    console.log('populatePageList called with pages:', pages);
     
-    pages.forEach(page => {
-      const pageItem = createPageItem(page);
-      pageList.appendChild(pageItem);
-    });
+    // Update private pages section
+    const privatePageList = document.getElementById('wb-private-pages');
+    if (privatePageList) {
+      console.log('Updating private pages list');
+      privatePageList.innerHTML = '';
+      pages.forEach(page => {
+        const pageItem = createPageItem(page);
+        privatePageList.appendChild(pageItem);
+      });
+    } else {
+      console.log('Private pages list not found');
+    }
+    
+    // Also refresh the current workspace if it's expanded
+    refreshCurrentWorkspace();
+  }
+  
+  function refreshCurrentWorkspace() {
+    if (!currentWorkspace) {
+      console.log('No current workspace to refresh');
+      return;
+    }
+    
+    console.log('Refreshing current workspace:', currentWorkspace);
+    
+    // Find the current workspace element - try different selectors
+    let workspaceElement = document.querySelector(`[data-workspace-name="${currentWorkspace}"]`);
+    if (!workspaceElement) {
+      // Try finding by workspace name in the text content
+      const workspaceItems = document.querySelectorAll('.wb-workspace-item');
+      for (let item of workspaceItems) {
+        const workspaceText = item.querySelector('.wb-workspace-text');
+        if (workspaceText && workspaceText.textContent.includes(currentWorkspace)) {
+          workspaceElement = item;
+          break;
+        }
+      }
+    }
+    
+    if (!workspaceElement) {
+      console.log('Workspace element not found for:', currentWorkspace);
+      return;
+    }
+    
+    // Find the pages container within this workspace - try different selectors
+    let pagesContainer = workspaceElement.querySelector('.wb-workspace-page-list');
+    if (!pagesContainer) {
+      pagesContainer = workspaceElement.querySelector('.wb-pages-list');
+    }
+    if (!pagesContainer) {
+      pagesContainer = workspaceElement.querySelector('.wb-page-list');
+    }
+    if (!pagesContainer) {
+      console.log('Pages container not found in workspace, trying to create one');
+      // Create a pages container if it doesn't exist
+      const workspacePages = workspaceElement.querySelector('.wb-workspace-pages');
+      if (workspacePages) {
+        pagesContainer = document.createElement('div');
+        pagesContainer.className = 'wb-workspace-page-list';
+        workspacePages.appendChild(pagesContainer);
+      }
+    }
+    
+    if (!pagesContainer) {
+      console.log('Could not find or create pages container');
+      return;
+    }
+    
+    console.log('Reloading pages for workspace:', currentWorkspace);
+    // Reload pages for this specific workspace
+    loadWorkspacePages(currentWorkspace, pagesContainer);
   }
   
   function populateWorkspacePageList(pages, container) {
@@ -1687,9 +1906,22 @@ function createNotionWorkbench() {
         'X-Frappe-CSRF-Token': csrfToken || 'token'
       }
     })
-    .then(response => response.json())
+    .then(response => {
+      if (response.status === 404) {
+        console.log('Page not found (likely deleted):', pageName);
+        // Clear current page if it was deleted
+        if (currentPageName === pageName) {
+          currentPageName = null;
+          document.getElementById('wb-editor').innerHTML = '';
+          document.getElementById('wb-title').value = '';
+          document.getElementById('wb-crumb-title').textContent = 'New page';
+        }
+        return;
+      }
+      return response.json();
+    })
     .then(data => {
-      if (data.message) {
+      if (data && data.message) {
         currentPageName = data.message.name;
         document.getElementById('wb-title').value = data.message.title;
         refreshSlashMenu();
@@ -2084,37 +2316,71 @@ function createNotionWorkbench() {
     if (confirm(`Delete "${page.title}"? This action cannot be undone.`)) {
       const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
       
-      fetch('/api/method/workbench.api.delete_page', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Frappe-CSRF-Token': csrfToken || 'token'
-        },
-        body: JSON.stringify({
-          name: page.name,
-          hard: 0 // Soft delete
+      // Add a small delay to avoid database lock issues
+      setTimeout(() => {
+        // First delete all collections for this page
+        fetch('/api/method/workbench.workbench.inline_api.inline_collection.delete_page_collections', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Frappe-CSRF-Token': csrfToken || 'token'
+          },
+          body: JSON.stringify({
+            page: page.name
+          })
         })
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.message && data.message.ok) {
-          console.log('Page deleted successfully');
-          loadPages(); // Reload pages list
-          // Clear editor if this was the current page
-          if (currentPageName === page.name) {
-            document.getElementById('wb-editor').innerHTML = '';
-            document.getElementById('wb-title').value = '';
-            currentPageName = null;
-          }
-        } else {
-          console.error('Delete failed:', data);
-          alert('Failed to delete page');
-        }
-      })
-      .catch(error => {
-        console.error('Delete error:', error);
-        alert('Error deleting page: ' + error.message);
-      });
+        .then(response => response.json())
+        .then(data => {
+          console.log('Collections deleted for page:', data);
+          
+          // Add another small delay before deleting the page
+          setTimeout(() => {
+            // Then delete the page
+            fetch('/api/method/workbench.api.delete_page', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Frappe-CSRF-Token': csrfToken || 'token'
+              },
+              body: JSON.stringify({
+                name: page.name,
+                hard: 1 // Hard delete
+              })
+            })
+            .then(response => response.json())
+            .then(data => {
+              if (data.message && data.message.ok) {
+                console.log('Page deleted successfully');
+                
+                // Clear editor if this was the current page
+                if (currentPageName === page.name) {
+                  document.getElementById('wb-editor').innerHTML = '';
+                  document.getElementById('wb-title').value = '';
+                  document.getElementById('wb-crumb-title').textContent = 'New page';
+                  currentPageName = null;
+                }
+                
+                // Reload pages list
+                loadPages();
+                
+                // Also refresh current workspace
+                refreshCurrentWorkspace();
+              } else {
+                console.error('Delete failed:', data);
+                alert('Failed to delete page');
+              }
+            })
+            .catch(error => {
+              console.error('Delete error:', error);
+              alert('Error deleting page: ' + error.message);
+            });
+          }, 500);
+        })
+        .catch(error => {
+          console.error('Collections delete error:', error);
+          alert('Error deleting collections: ' + error.message);
+        });
+      }, 100);
     }
   }
   
@@ -2192,6 +2458,8 @@ function createNotionWorkbench() {
       }
     });
   }
+  
+  // Theme and delete functionality removed
   
   console.log('Notion-style workbench with save functionality created successfully');
 }
@@ -3278,6 +3546,219 @@ document.addEventListener('DOMContentLoaded', function() {
 .wb-list-view {
   scrollbar-width: thin;
   scrollbar-color: #cbd5e1 #f1f5f9;
+}
+
+/* Dark theme styles */
+[data-theme="dark"] {
+  --wb-bg: #1a1a1a;
+  --wb-sidebar-bg: #2d2d2d;
+  --wb-text: #e0e0e0;
+  --wb-text-muted: #a0a0a0;
+  --wb-border: #404040;
+  --wb-hover: #3a3a3a;
+  --wb-active: #4a4a4a;
+  --wb-shadow: rgba(0, 0, 0, 0.3);
+  --wb-input-bg: #2d2d2d;
+  --wb-button-bg: #404040;
+  --wb-button-hover: #505050;
+  --wb-danger: #ff6b6b;
+  --wb-danger-hover: #ff5252;
+}
+
+[data-theme="dark"] #wb-app {
+  background: var(--wb-bg);
+  color: var(--wb-text);
+}
+
+[data-theme="dark"] .wb-sidebar {
+  background: var(--wb-sidebar-bg);
+  border-right-color: var(--wb-border);
+}
+
+[data-theme="dark"] .wb-page-header {
+  background: var(--wb-bg);
+  border-bottom-color: var(--wb-border);
+}
+
+[data-theme="dark"] .wb-page-title-row {
+  background: var(--wb-bg);
+}
+
+[data-theme="dark"] .wb-title {
+  color: var(--wb-text);
+  background: transparent;
+}
+
+[data-theme="dark"] .wb-editor {
+  background: var(--wb-bg);
+  color: var(--wb-text);
+}
+
+[data-theme="dark"] .wb-block {
+  color: var(--wb-text);
+}
+
+[data-theme="dark"] .wb-block[contenteditable="true"] {
+  color: var(--wb-text);
+}
+
+[data-theme="dark"] .wb-block[contenteditable="true"]:focus {
+  background: var(--wb-hover);
+}
+
+[data-theme="dark"] .wb-workspace-header {
+  color: var(--wb-text);
+}
+
+[data-theme="dark"] .wb-workspace-header:hover {
+  background: var(--wb-hover);
+}
+
+[data-theme="dark"] .wb-page-item {
+  color: var(--wb-text);
+}
+
+[data-theme="dark"] .wb-page-item:hover {
+  background: var(--wb-hover);
+}
+
+[data-theme="dark"] .wb-page-item.active {
+  background: var(--wb-active);
+}
+
+[data-theme="dark"] .wb-btn {
+  background: var(--wb-button-bg);
+  color: var(--wb-text);
+  border-color: var(--wb-border);
+}
+
+[data-theme="dark"] .wb-btn:hover {
+  background: var(--wb-button-hover);
+}
+
+[data-theme="dark"] .wb-btn.danger {
+  background: var(--wb-danger);
+  color: white;
+}
+
+[data-theme="dark"] .wb-btn.danger:hover {
+  background: var(--wb-danger-hover);
+}
+
+[data-theme="dark"] .wb-btn.ghost {
+  background: transparent;
+  color: var(--wb-text);
+}
+
+[data-theme="dark"] .wb-btn.ghost:hover {
+  background: var(--wb-hover);
+}
+
+[data-theme="dark"] .wb-search input {
+  background: var(--wb-input-bg);
+  color: var(--wb-text);
+  border-color: var(--wb-border);
+}
+
+[data-theme="dark"] .wb-search input::placeholder {
+  color: var(--wb-text-muted);
+}
+
+[data-theme="dark"] .wb-badge {
+  background: var(--wb-button-bg);
+  color: var(--wb-text);
+}
+
+[data-theme="dark"] .wb-slash-menu {
+  background: var(--wb-sidebar-bg);
+  border-color: var(--wb-border);
+  box-shadow: 0 4px 12px var(--wb-shadow);
+}
+
+[data-theme="dark"] .wb-slash-menu-item {
+  color: var(--wb-text);
+}
+
+[data-theme="dark"] .wb-slash-menu-item:hover {
+  background: var(--wb-hover);
+}
+
+[data-theme="dark"] .wb-block-menu {
+  background: var(--wb-sidebar-bg);
+  border-color: var(--wb-border);
+  box-shadow: 0 4px 12px var(--wb-shadow);
+}
+
+[data-theme="dark"] .wb-block-menu-item {
+  color: var(--wb-text);
+}
+
+[data-theme="dark"] .wb-block-menu-item:hover {
+  background: var(--wb-hover);
+}
+
+[data-theme="dark"] .wb-collection-block {
+  background: var(--wb-bg);
+  border-color: var(--wb-border);
+}
+
+[data-theme="dark"] .wb-collection-header {
+  background: var(--wb-sidebar-bg);
+  border-bottom-color: var(--wb-border);
+}
+
+[data-theme="dark"] .wb-collection-view-btn {
+  color: var(--wb-text);
+}
+
+[data-theme="dark"] .wb-collection-view-btn:hover {
+  background: var(--wb-hover);
+}
+
+[data-theme="dark"] .wb-collection-view-btn.active {
+  background: var(--wb-active);
+}
+
+[data-theme="dark"] .wb-table {
+  background: var(--wb-bg);
+  color: var(--wb-text);
+}
+
+[data-theme="dark"] .wb-table th {
+  background: var(--wb-sidebar-bg);
+  color: var(--wb-text);
+  border-color: var(--wb-border);
+}
+
+[data-theme="dark"] .wb-table td {
+  border-color: var(--wb-border);
+}
+
+[data-theme="dark"] .wb-table tr:hover {
+  background: var(--wb-hover);
+}
+
+[data-theme="dark"] .wb-empty-state {
+  color: var(--wb-text-muted);
+}
+
+[data-theme="dark"] .wb-modal {
+  background: var(--wb-sidebar-bg);
+  color: var(--wb-text);
+}
+
+[data-theme="dark"] .wb-modal-header {
+  background: var(--wb-bg);
+  border-bottom-color: var(--wb-border);
+}
+
+[data-theme="dark"] .wb-modal-content {
+  background: var(--wb-bg);
+}
+
+[data-theme="dark"] .wb-modal-footer {
+  background: var(--wb-bg);
+  border-top-color: var(--wb-border);
 }
 </style>
 {% endblock %}
