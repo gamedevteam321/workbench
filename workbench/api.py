@@ -153,6 +153,21 @@ def get_workspace_pages(workspace):
     
     return pages
 
+@frappe.whitelist()
+def get_all_workspace_pages(workspace):
+    """Get ALL pages for a workspace (including private/archived) - for admin operations."""
+    frappe.only_for(["System Manager", "All"])
+    
+    # Get ALL pages in the workspace, regardless of visibility or archive status
+    all_pages = frappe.get_all(
+        "Notion Page",
+        filters={"workspace": workspace},
+        fields=["name", "title", "is_archived", "visibility"],
+        order_by="creation asc",
+    )
+    
+    return all_pages
+
 def has_workspace_access(workspace, user, write=False):
     """Check if user has access to workspace."""
     # Owner always has access
@@ -401,8 +416,8 @@ def delete_workspace(workspace_name: str):
     frappe.only_for(["System Manager", "All"])
     
     try:
-        # Check if workspace has pages
-        pages = frappe.get_all("Notion Page", filters={"workspace": workspace_name})
+        # Check if workspace has non-archived pages (same logic as get_workspace_pages)
+        pages = frappe.get_all("Notion Page", filters={"workspace": workspace_name, "is_archived": 0})
         if pages:
             return {"ok": False, "error": "Cannot delete workspace with pages. Move or delete pages first."}
         

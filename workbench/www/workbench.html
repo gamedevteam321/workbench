@@ -3,6 +3,8 @@
 
 {% block head_include %}
 <link rel="stylesheet" href="/assets/workbench/css/workbench.bundle.css">
+<script src="/assets/workbench/js/db/inline_api.js"></script>
+<script src="/assets/workbench/js/editor/blocks_collection.js"></script>
 <script>
 console.log('HTML template loaded');
 </script>
@@ -105,6 +107,28 @@ function createNotionWorkbench() {
         quote: { icon: '💬', name: 'Quote', create: () => createBlock('quote') },
         divider: { icon: '➖', name: 'Divider', create: () => createBlock('divider') }
       };
+
+      // Collection block types (only available when page is loaded)
+      const collectionBlockTypes = {
+        table: { icon: '📊', name: 'Table', create: () => createCollectionBlock('table') },
+        board: { icon: '📋', name: 'Board', create: () => createCollectionBlock('board') },
+        calendar: { icon: '📅', name: 'Calendar', create: () => createCollectionBlock('calendar') },
+        gallery: { icon: '🖼️', name: 'Gallery', create: () => createCollectionBlock('gallery') },
+        timeline: { icon: '📈', name: 'Timeline', create: () => createCollectionBlock('timeline') },
+        list: { icon: '📝', name: 'List', create: () => createCollectionBlock('list') }
+      };
+
+      // Function to get all available block types
+      function getAllBlockTypes() {
+        // Always include collection blocks for testing
+        return { ...blockTypes, ...collectionBlockTypes };
+      }
+
+      // Function to refresh slash menu when page changes
+      function refreshSlashMenu() {
+        // This will be called when a page is loaded to update available block types
+        console.log('Page loaded, collection blocks now available');
+      }
   
       // Get the position of a numbered list item in the sequence
       function getNumberedListPosition(currentBlock) {
@@ -153,6 +177,31 @@ function createNotionWorkbench() {
         });
       }
       
+      // Create a collection block
+      async function createCollectionBlock(viewType) {
+        try {
+          // If no current page, create a temporary one for demo purposes
+          if (!currentPageName) {
+            console.log('No current page, creating temporary page for collection block');
+            // Create a temporary page name for demo
+            currentPageName = `temp-page-${Date.now()}`;
+            console.log('Using temporary page:', currentPageName);
+          }
+          
+          const renderer = new CollectionBlockRenderer();
+          const block = await renderer.createCollectionBlock(viewType, currentPageName);
+          
+          // Add save listener
+          addSaveListener(block);
+          
+          return block;
+        } catch (error) {
+          console.error('Failed to create collection block:', error);
+          // Fallback to paragraph block
+          return createBlock('paragraph', '❌ Failed to create collection block. Please try again.');
+        }
+      }
+
       // Create a block
       function createBlock(type, content = '') {
     const block = document.createElement('div');
@@ -606,7 +655,7 @@ function createNotionWorkbench() {
       overflow-y: auto;
     `;
     
-    Object.entries(blockTypes).forEach(([key, type]) => {
+    Object.entries(getAllBlockTypes()).forEach(([key, type]) => {
       const item = document.createElement('div');
       item.className = 'wb-slash-item';
       item.style.cssText = `
@@ -623,32 +672,41 @@ function createNotionWorkbench() {
         </div>
       `;
       
-      item.addEventListener('click', () => {
-        const newBlock = type.create();
-        
-        // Check if we're inside a toggle block
-        const isInsideToggle = block.classList.contains('wb-toggle-child') || block.querySelector('.wb-toggle');
-        
-        if (isInsideToggle) {
-          // If inside a toggle, create an indented child block
-          newBlock.style.marginLeft = '16px';
-          newBlock.classList.add('wb-toggle-child');
-          block.insertAdjacentElement('afterend', newBlock);
-        } else {
-          // Regular replacement
-          block.replaceWith(newBlock);
+      item.addEventListener('click', async () => {
+        try {
+          const newBlock = await type.create();
+          console.log('New block created:', newBlock);
+          console.log('New block HTML:', newBlock.outerHTML);
+          
+          // Check if we're inside a toggle block
+          const isInsideToggle = block.classList.contains('wb-toggle-child') || block.querySelector('.wb-toggle');
+          
+          if (isInsideToggle) {
+            // If inside a toggle, create an indented child block
+            newBlock.style.marginLeft = '16px';
+            newBlock.classList.add('wb-toggle-child');
+            block.insertAdjacentElement('afterend', newBlock);
+            console.log('Block inserted after toggle');
+          } else {
+            // Regular replacement
+            block.replaceWith(newBlock);
+            console.log('Block replaced');
+          }
+          
+          // Update numbered list positions if it's a numbered list
+          if (newBlock.dataset.type === 'numbered') {
+            setTimeout(updateNumberedListPositions, 10);
+          }
+          
+          const newEditable = newBlock.querySelector('[contenteditable]');
+          if (newEditable) {
+            newEditable.focus();
+          }
+          menu.remove();
+        } catch (error) {
+          console.error('Failed to create block:', error);
+          menu.remove();
         }
-        
-        // Update numbered list positions if it's a numbered list
-        if (newBlock.dataset.type === 'numbered') {
-          setTimeout(updateNumberedListPositions, 10);
-        }
-        
-        const newEditable = newBlock.querySelector('[contenteditable]');
-        if (newEditable) {
-          newEditable.focus();
-        }
-        menu.remove();
       });
       
       menu.appendChild(item);
@@ -1205,11 +1263,19 @@ function createNotionWorkbench() {
         content = editable.textContent || '';
       }
       
-      blocks.push({
+      const blockData = {
         id: block.dataset.id,
         type: type,
         content: content
-      });
+      };
+      
+      // Add collection-specific metadata
+      if (type === 'collection' && block.collectionData) {
+        blockData.blockId = block.collectionData.blockId;
+        blockData.viewType = block.collectionData.viewType;
+      }
+      
+      blocks.push(blockData);
     });
     
     const contentData = {
@@ -1225,6 +1291,11 @@ function createNotionWorkbench() {
     console.log('Using CSRF token:', csrfToken);
     
     // Save to backend
+    console.log('Content would be saved:', {
+      name: currentPageName,
+      content: contentData
+    });
+    
     fetch('/api/method/workbench.api.update_page', {
       method: 'POST',
       headers: {
@@ -1288,6 +1359,7 @@ function createNotionWorkbench() {
         currentPageName = data.message.name;
         document.getElementById('wb-title').value = data.message.title;
         console.log('New page created:', data.message);
+        refreshSlashMenu();
         
         // Reload pages list
         if (currentWorkspace) {
@@ -1365,7 +1437,10 @@ function createNotionWorkbench() {
         <div class="wb-workspace-header">
           <span class="wb-workspace-icon">🏠</span>
           <span class="wb-workspace-text">${workspace.title}</span>
-          <span class="wb-workspace-toggle">▼</span>
+          <div class="wb-workspace-actions">
+            <span class="wb-workspace-toggle">▼</span>
+            <button class="wb-workspace-menu-btn" title="Workspace options">⋯</button>
+          </div>
         </div>
         <div class="wb-workspace-pages" style="display: none;">
           <div class="wb-workspace-new-page">
@@ -1379,8 +1454,15 @@ function createNotionWorkbench() {
       // Toggle workspace expansion
       const toggle = workspaceItem.querySelector('.wb-workspace-toggle');
       const pagesContainer = workspaceItem.querySelector('.wb-workspace-pages');
+      const menuBtn = workspaceItem.querySelector('.wb-workspace-menu-btn');
       
-      workspaceItem.querySelector('.wb-workspace-header').addEventListener('click', () => {
+      // Handle workspace header click (excluding menu button)
+      workspaceItem.querySelector('.wb-workspace-header').addEventListener('click', (e) => {
+        // Don't toggle if clicking the menu button
+        if (e.target.closest('.wb-workspace-menu-btn')) {
+          return;
+        }
+        
         const isExpanded = pagesContainer.style.display !== 'none';
         pagesContainer.style.display = isExpanded ? 'none' : 'block';
         toggle.textContent = isExpanded ? '▶' : '▼';
@@ -1390,6 +1472,12 @@ function createNotionWorkbench() {
           currentWorkspace = workspace.name;
           loadWorkspacePages(workspace.name, pagesContainer.querySelector('.wb-workspace-page-list'));
         }
+      });
+      
+      // Handle workspace menu button click
+      menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showWorkspaceMenu(workspace, workspaceItem);
       });
       
       // New page in workspace
@@ -1604,6 +1692,7 @@ function createNotionWorkbench() {
       if (data.message) {
         currentPageName = data.message.name;
         document.getElementById('wb-title').value = data.message.title;
+        refreshSlashMenu();
         
         // Load content
         if (data.message.content_json) {
@@ -1626,11 +1715,21 @@ function createNotionWorkbench() {
     editor.innerHTML = '';
     
     if (content.blocks) {
-      content.blocks.forEach(blockData => {
-        const block = createBlock(blockData.type, blockData.content || '');
-        block.dataset.id = blockData.id;
-        editor.appendChild(block);
-        addSaveListener(block);
+      content.blocks.forEach(async (blockData) => {
+        if (blockData.type === 'collection') {
+          // Handle collection blocks specially
+          const renderer = new CollectionBlockRenderer();
+          const block = await renderer.loadCollectionBlock(blockData.blockId, blockData.viewType, currentPageName);
+          block.dataset.id = blockData.id;
+          editor.appendChild(block);
+          addSaveListener(block);
+        } else {
+          // Handle regular blocks
+          const block = createBlock(blockData.type, blockData.content || '');
+          block.dataset.id = blockData.id;
+          editor.appendChild(block);
+          addSaveListener(block);
+        }
       });
     }
     
@@ -1644,6 +1743,214 @@ function createNotionWorkbench() {
     }
   }
   
+  // Workspace menu functionality
+  function showWorkspaceMenu(workspace, workspaceItem) {
+    const menu = document.createElement('div');
+    menu.className = 'wb-workspace-menu';
+    menu.style.cssText = `
+      position: absolute;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      z-index: 1000;
+      min-width: 200px;
+    `;
+    
+    const menuItems = [
+      { icon: '✏️', name: 'Rename workspace', action: () => renameWorkspace(workspace) },
+      { icon: '🗑️', name: 'Delete workspace & all pages', action: () => deleteWorkspace(workspace) }
+    ];
+    
+    menuItems.forEach(item => {
+      const menuItem = document.createElement('div');
+      menuItem.className = 'wb-workspace-menu-item';
+      menuItem.innerHTML = `
+        <span class="wb-workspace-menu-icon">${item.icon}</span>
+        <span class="wb-workspace-menu-text">${item.name}</span>
+      `;
+      menuItem.addEventListener('click', () => {
+        item.action();
+        menu.remove();
+      });
+      menu.appendChild(menuItem);
+    });
+    
+    // Position menu
+    const rect = workspaceItem.getBoundingClientRect();
+    menu.style.left = `${rect.right - 200}px`;
+    menu.style.top = `${rect.top + 30}px`;
+    
+    document.body.appendChild(menu);
+    
+    // Close menu when clicking outside
+    const closeMenu = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener('click', closeMenu);
+      }
+    };
+    
+    setTimeout(() => {
+      document.addEventListener('click', closeMenu);
+    }, 100);
+  }
+  
+  // Rename workspace
+  function renameWorkspace(workspace) {
+    const newTitle = prompt('Rename workspace:', workspace.title);
+    if (newTitle && newTitle.trim() && newTitle !== workspace.title) {
+      const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+      
+      fetch('/api/method/workbench.api.update_workspace_settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Frappe-CSRF-Token': csrfToken || 'token'
+        },
+        body: JSON.stringify({
+          workspace_name: workspace.name,
+          title: newTitle.trim()
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.message && data.message.ok) {
+          console.log('Workspace renamed successfully');
+          loadWorkspaces(); // Refresh workspace list
+        } else {
+          console.error('Rename failed:', data.message?.error || data);
+          alert('Failed to rename workspace: ' + (data.message?.error || 'Unknown error'));
+        }
+      })
+      .catch(error => {
+        console.error('Rename error:', error);
+        alert('Error renaming workspace: ' + error.message);
+      });
+    }
+  }
+  
+  // Delete workspace
+  function deleteWorkspace(workspace) {
+    if (confirm(`Delete workspace "${workspace.title}" and all pages inside it? This action cannot be undone.`)) {
+      const csrfToken = window.csrf_token || (window.frappe && window.frappe.csrf_token);
+      
+      // First, get ALL pages in the workspace (including private/archived ones)
+      fetch('/api/method/workbench.api.get_all_workspace_pages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Frappe-CSRF-Token': csrfToken || 'token'
+        },
+        body: JSON.stringify({
+          workspace: workspace.name
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.message) {
+          const pages = data.message;
+          console.log(`Found ${pages.length} pages in workspace, deleting them first...`);
+          
+          // Delete all pages first (with collections)
+          const deletePromises = pages.map(page => {
+            console.log(`Deleting page: ${page.name}`);
+            
+            // First, delete all collections for this page
+            return fetch('/api/method/workbench.workbench.inline_api.inline_collection.delete_page_collections', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Frappe-CSRF-Token': csrfToken || 'token'
+              },
+              body: JSON.stringify({
+                page: page.name
+              })
+            }).then(response => response.json())
+            .then(collectionResult => {
+              console.log(`Collections deleted for page ${page.name}:`, collectionResult);
+              
+              // Then delete the page
+              return fetch('/api/method/workbench.api.delete_page', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Frappe-CSRF-Token': csrfToken || 'token'
+                },
+                body: JSON.stringify({
+                  name: page.name,
+                  hard: 1 // Hard delete
+                })
+              }).then(response => response.json())
+              .then(data => {
+                console.log(`Page ${page.name} delete result:`, data);
+                return data;
+              });
+            });
+          });
+          
+          // Wait for all pages to be deleted
+          return Promise.all(deletePromises);
+        } else {
+          return []; // No pages to delete
+        }
+      })
+      .then(() => {
+        console.log('All pages deleted, verifying workspace is empty...');
+        
+        // Add a small delay to ensure database is updated
+        return new Promise(resolve => setTimeout(resolve, 1000));
+      })
+      .then(() => {
+        // Verify workspace is empty before deleting
+        return fetch(`/api/method/workbench.api.get_workspace_pages?workspace=${workspace.name}`, {
+          method: 'GET',
+          headers: {
+            'X-Frappe-CSRF-Token': csrfToken || 'token'
+          }
+        });
+      })
+      .then(response => response.json())
+      .then(data => {
+        console.log('Verification result:', data);
+        if (data.message && data.message.length > 0) {
+          console.error(`Workspace still has ${data.message.length} pages, cannot delete`);
+          throw new Error(`Workspace still has ${data.message.length} pages`);
+        }
+        console.log('Workspace is empty, proceeding with deletion...');
+        
+        // Let's also check what the delete_workspace API sees
+        console.log('About to call delete_workspace API with workspace_name:', workspace.name);
+        
+        // Now delete the workspace
+        return fetch('/api/method/workbench.api.delete_workspace', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Frappe-CSRF-Token': csrfToken || 'token'
+          },
+          body: JSON.stringify({
+            workspace_name: workspace.name
+          })
+        });
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.message && data.message.ok) {
+          console.log('Workspace and all pages deleted successfully');
+          loadWorkspaces(); // Refresh workspace list
+        } else {
+          console.error('Delete failed:', data.message?.error || data);
+          alert('Failed to delete workspace: ' + (data.message?.error || 'Unknown error'));
+        }
+      })
+      .catch(error => {
+        console.error('Delete error:', error);
+        alert('Error deleting workspace: ' + error.message);
+      });
+    }
+  }
+
   // Page menu functionality
   function showPageMenu(page, pageItem) {
     const menu = document.createElement('div');
@@ -1902,4 +2209,1075 @@ document.addEventListener('DOMContentLoaded', function() {
   createNotionWorkbench();
 });
 </script>
+
+<style>
+/* Main Layout Styles */
+#wb-app {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.wb-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.wb-page-header {
+  flex-shrink: 0;
+  padding: 16px 24px;
+  border-bottom: 1px solid #e1e5e9;
+  background: white;
+}
+
+.wb-page-title-row {
+  flex-shrink: 0;
+  padding: 0 24px 16px 24px;
+  background: white;
+}
+
+.wb-title {
+  width: 100%;
+  border: none;
+  outline: none;
+  font-size: 32px;
+  font-weight: 700;
+  color: #333;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+}
+
+.wb-title::placeholder {
+  color: #999;
+}
+
+#wb-editor {
+  flex: 1;
+  padding: 0 24px 200px 24px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  background: white;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f1f5f9;
+}
+
+#wb-editor::-webkit-scrollbar {
+  width: 8px;
+}
+
+#wb-editor::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+#wb-editor::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+#wb-editor::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Workspace Menu Styles */
+.wb-workspace-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-workspace-menu-btn {
+  background: none;
+  border: none;
+  padding: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #666;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.2s, background-color 0.2s;
+}
+
+.wb-workspace-item:hover .wb-workspace-menu-btn {
+  opacity: 1;
+}
+
+.wb-workspace-menu-btn:hover {
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+.wb-workspace-menu {
+  position: absolute;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  z-index: 1000;
+  min-width: 200px;
+  overflow: hidden;
+}
+
+.wb-workspace-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.wb-workspace-menu-item:last-child {
+  border-bottom: none;
+}
+
+.wb-workspace-menu-item:hover {
+  background-color: #f8f9fa;
+}
+
+.wb-workspace-menu-icon {
+  font-size: 16px;
+  width: 20px;
+  text-align: center;
+}
+
+.wb-workspace-menu-text {
+  font-size: 14px;
+  color: #333;
+}
+
+/* Collection Block Styles */
+.wb-collection-block {
+  border: 1px solid #e1e5e9;
+  border-radius: 8px;
+  background: white;
+  margin: 8px 0;
+  overflow: visible;
+  min-height: 400px;
+  width: 100%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.wb-collection-header {
+  background: #f8f9fa;
+  border-bottom: 1px solid #e1e5e9;
+  padding: 8px 12px;
+}
+
+.wb-collection-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wb-collection-toolbar-left,
+.wb-collection-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wb-collection-toolbar-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.wb-collection-view-switcher {
+  display: flex;
+  background: white;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.wb-collection-view-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  color: #6b7280;
+  transition: all 0.2s;
+}
+
+.wb-collection-view-btn:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.wb-collection-view-btn.active {
+  background: #3b82f6;
+  color: white;
+}
+
+.wb-collection-view-btn .wb-icon {
+  font-size: 14px;
+}
+
+.wb-collection-view-btn .wb-label {
+  font-weight: 500;
+}
+
+.wb-collection-new-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.wb-collection-new-btn:hover {
+  background: #2563eb;
+}
+
+.wb-collection-filter-btn,
+.wb-collection-sort-btn,
+.wb-collection-search-btn,
+.wb-collection-more-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #d1d5db;
+  background: white;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.wb-collection-filter-btn:hover,
+.wb-collection-sort-btn:hover,
+.wb-collection-search-btn:hover,
+.wb-collection-more-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.wb-collection-content {
+  padding: 16px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  max-height: 600px;
+}
+
+.wb-collection-view-container {
+  min-height: 300px;
+  padding: 20px;
+  background: #fafafa;
+  border-radius: 6px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+/* Table View Styles */
+.wb-table-view {
+  width: 100%;
+  background: white;
+  border-radius: 6px;
+  overflow: hidden;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+}
+
+.wb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  background: white;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  flex: 1;
+  min-height: 200px;
+}
+
+.wb-table th {
+  text-align: left;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e1e5e9;
+  font-weight: 600;
+  color: #374151;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.wb-table td {
+  padding: 12px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: top;
+  background: white;
+}
+
+.wb-table tr:hover {
+  background: #f8f9fa;
+}
+
+.wb-table tbody {
+  display: block;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.wb-table thead,
+.wb-table tbody tr {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.wb-table-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.wb-item-edit-btn,
+.wb-item-delete-btn {
+  padding: 4px 8px;
+  margin-left: 4px;
+  border: 1px solid #d1d5db;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.wb-item-edit-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.wb-item-delete-btn:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+
+.wb-table-empty {
+  text-align: center;
+}
+
+.wb-empty-state {
+  padding: 40px 20px;
+  color: #6b7280;
+  text-align: center;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
+}
+
+.wb-empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.wb-empty-text {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: #374151;
+}
+
+.wb-empty-subtext {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+/* Property Chips */
+.wb-property-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-right: 4px;
+  margin-bottom: 2px;
+}
+
+.wb-property-select {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.wb-property-multi-select {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.wb-property-file {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .wb-collection-block {
+    margin: 4px 0;
+    min-height: 300px;
+  }
+  
+  .wb-collection-toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px;
+  }
+  
+  .wb-collection-view-switcher {
+    order: 3;
+    width: 100%;
+    justify-content: center;
+    margin: 8px 0;
+  }
+  
+  .wb-collection-view-btn {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+  
+  .wb-collection-view-btn .wb-label {
+    display: none;
+  }
+  
+  .wb-collection-content {
+    padding: 12px;
+  }
+  
+  .wb-collection-view-container {
+    padding: 12px;
+    min-height: 200px;
+  }
+  
+  .wb-table {
+    font-size: 12px;
+  }
+  
+  .wb-table th,
+  .wb-table td {
+    padding: 6px 8px;
+  }
+  
+  .wb-collection-new-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .wb-collection-block {
+    margin: 2px 0;
+    min-height: 250px;
+  }
+  
+  .wb-collection-toolbar {
+    flex-direction: column;
+    gap: 4px;
+  }
+  
+  .wb-collection-toolbar-left,
+  .wb-collection-toolbar-right {
+    justify-content: center;
+    width: 100%;
+  }
+  
+  .wb-collection-view-switcher {
+    order: 0;
+    margin: 0 0 8px 0;
+  }
+  
+  .wb-collection-content {
+    padding: 8px;
+  }
+  
+  .wb-collection-view-container {
+    padding: 8px;
+    min-height: 150px;
+  }
+}
+
+/* Board View Styles */
+.wb-board-view {
+  padding: 16px;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+.wb-board-columns {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 16px;
+  min-height: 0;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f1f5f9;
+}
+
+.wb-board-columns::-webkit-scrollbar {
+  height: 8px;
+}
+
+.wb-board-columns::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+.wb-board-columns::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.wb-board-columns::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.wb-board-column {
+  min-width: 280px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.wb-board-column-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e1e5e9;
+}
+
+.wb-board-column-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.wb-board-count {
+  background: #e3f2fd;
+  color: #1976d2;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.wb-board-card {
+  background: white;
+  border: 1px solid #e1e5e9;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wb-board-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-color: #1976d2;
+}
+
+.wb-board-card-title {
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: #333;
+}
+
+.wb-board-card-meta {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.wb-board-card-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.wb-board-card-actions button {
+  padding: 4px 8px;
+  font-size: 11px;
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* Calendar View Styles */
+.wb-calendar-view {
+  padding: 16px;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+.wb-calendar-header {
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.wb-calendar-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+}
+
+.wb-calendar-grid {
+  border: 1px solid #e1e5e9;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.wb-calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  background: #f8f9fa;
+  border-bottom: 1px solid #e1e5e9;
+}
+
+.wb-calendar-weekdays > div {
+  padding: 8px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 12px;
+  color: #666;
+}
+
+.wb-calendar-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.wb-calendar-day {
+  min-height: 80px;
+  border-right: 1px solid #e1e5e9;
+  border-bottom: 1px solid #e1e5e9;
+  padding: 8px;
+  position: relative;
+}
+
+.wb-calendar-day:last-child {
+  border-right: none;
+}
+
+.wb-calendar-day-empty {
+  background: #f8f9fa;
+}
+
+.wb-calendar-day-today {
+  background: #e3f2fd;
+}
+
+.wb-calendar-day-number {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #333;
+}
+
+.wb-calendar-item {
+  background: #1976d2;
+  color: white;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  margin-bottom: 2px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.wb-calendar-item-start {
+  border-left: 3px solid #0d47a1;
+}
+
+.wb-calendar-item-end {
+  border-right: 3px solid #0d47a1;
+}
+
+.wb-calendar-item-spanning {
+  background: #e3f2fd;
+  color: #1976d2;
+  border: 1px solid #1976d2;
+}
+
+.wb-calendar-item-title {
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.wb-calendar-item-assignee {
+  font-size: 10px;
+  opacity: 0.9;
+  margin-bottom: 1px;
+}
+
+.wb-calendar-item-priority {
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+.priority-low { background: #4caf50; color: white; }
+.priority-medium { background: #ff9800; color: white; }
+.priority-high { background: #f44336; color: white; }
+.priority-urgent { background: #9c27b0; color: white; }
+
+/* Gallery View Styles */
+.wb-gallery-view {
+  padding: 16px;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+.wb-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.wb-gallery-item {
+  background: white;
+  border: 1px solid #e1e5e9;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wb-gallery-item:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-color: #1976d2;
+}
+
+.wb-gallery-item-image {
+  height: 120px;
+  background: #f8f9fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wb-gallery-placeholder {
+  font-size: 32px;
+  color: #ccc;
+}
+
+.wb-gallery-item-content {
+  padding: 12px;
+}
+
+.wb-gallery-item-title {
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: #333;
+}
+
+.wb-gallery-item-meta {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.wb-gallery-item-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.wb-gallery-item-actions button {
+  padding: 4px 8px;
+  font-size: 11px;
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* Timeline View Styles */
+.wb-timeline-view {
+  padding: 16px;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+.wb-timeline-container {
+  position: relative;
+  padding-left: 24px;
+}
+
+.wb-timeline-container::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #e1e5e9;
+}
+
+.wb-timeline-item {
+  position: relative;
+  margin-bottom: 24px;
+}
+
+.wb-timeline-marker {
+  position: absolute;
+  left: -18px;
+  top: 8px;
+  width: 12px;
+  height: 12px;
+  background: #1976d2;
+  border-radius: 50%;
+  border: 3px solid white;
+  box-shadow: 0 0 0 2px #e1e5e9;
+}
+
+.wb-timeline-content {
+  background: white;
+  border: 1px solid #e1e5e9;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.wb-timeline-item-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #333;
+}
+
+.wb-timeline-item-meta {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 8px;
+  display: flex;
+  gap: 12px;
+}
+
+.wb-timeline-item-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.wb-timeline-item-actions button {
+  padding: 4px 8px;
+  font-size: 11px;
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.wb-timeline-item-range {
+  position: relative;
+}
+
+.wb-timeline-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.wb-timeline-priority {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.wb-timeline-item-status {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.status-not-started { background: #e0e0e0; color: #666; }
+.status-in-progress { background: #e3f2fd; color: #1976d2; }
+.status-done { background: #e8f5e8; color: #2e7d32; }
+
+.wb-timeline-item-assignee {
+  font-size: 11px;
+  color: #666;
+  margin-left: 8px;
+}
+
+.wb-timeline-item-bar {
+  height: 4px;
+  background: linear-gradient(90deg, #1976d2, #42a5f5);
+  border-radius: 2px;
+  margin: 8px 0;
+  position: relative;
+}
+
+.wb-timeline-item-bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent,
+    transparent 4px,
+    rgba(255,255,255,0.3) 4px,
+    rgba(255,255,255,0.3) 8px
+  );
+  width: 100%;
+}
+
+.wb-timeline-marker.priority-low { background: #4caf50; }
+.wb-timeline-marker.priority-medium { background: #ff9800; }
+.wb-timeline-marker.priority-high { background: #f44336; }
+.wb-timeline-marker.priority-urgent { background: #9c27b0; }
+
+/* List View Styles */
+.wb-list-view {
+  padding: 16px;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+.wb-list-container {
+  background: white;
+  border: 1px solid #e1e5e9;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.wb-list-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f0f0;
+  transition: background-color 0.2s ease;
+}
+
+.wb-list-item:last-child {
+  border-bottom: none;
+}
+
+.wb-list-item:hover {
+  background: #f8f9fa;
+}
+
+.wb-list-item-content {
+  flex: 1;
+}
+
+.wb-list-item-title {
+  font-weight: 500;
+  margin-bottom: 2px;
+  color: #333;
+}
+
+.wb-list-item-meta {
+  font-size: 12px;
+  color: #666;
+  display: flex;
+  gap: 12px;
+}
+
+.wb-list-item-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.wb-list-item-actions button {
+  padding: 4px 8px;
+  font-size: 11px;
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* Custom Scrollbar Styles */
+.wb-collection-content::-webkit-scrollbar,
+.wb-board-view::-webkit-scrollbar,
+.wb-calendar-view::-webkit-scrollbar,
+.wb-gallery-view::-webkit-scrollbar,
+.wb-timeline-view::-webkit-scrollbar,
+.wb-list-view::-webkit-scrollbar {
+  width: 8px;
+}
+
+.wb-collection-content::-webkit-scrollbar-track,
+.wb-board-view::-webkit-scrollbar-track,
+.wb-calendar-view::-webkit-scrollbar-track,
+.wb-gallery-view::-webkit-scrollbar-track,
+.wb-timeline-view::-webkit-scrollbar-track,
+.wb-list-view::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+.wb-collection-content::-webkit-scrollbar-thumb,
+.wb-board-view::-webkit-scrollbar-thumb,
+.wb-calendar-view::-webkit-scrollbar-thumb,
+.wb-gallery-view::-webkit-scrollbar-thumb,
+.wb-timeline-view::-webkit-scrollbar-thumb,
+.wb-list-view::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.wb-collection-content::-webkit-scrollbar-thumb:hover,
+.wb-board-view::-webkit-scrollbar-thumb:hover,
+.wb-calendar-view::-webkit-scrollbar-thumb:hover,
+.wb-gallery-view::-webkit-scrollbar-thumb:hover,
+.wb-timeline-view::-webkit-scrollbar-thumb:hover,
+.wb-list-view::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Firefox scrollbar styles */
+.wb-collection-content,
+.wb-board-view,
+.wb-calendar-view,
+.wb-gallery-view,
+.wb-timeline-view,
+.wb-list-view {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f1f5f9;
+}
+</style>
 {% endblock %}

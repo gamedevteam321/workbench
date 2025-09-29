@@ -15,6 +15,15 @@ web_include_css = ["/assets/workbench/css/workbench.css"]
 
 # Whitelisted APIs live in workbench.api
 
+# DocTypes
+# ------------------
+
+doc_events = {
+	"WB Inline Collection": {
+		"on_trash": "workbench.api.inline_collection.cleanup_collection_items"
+	}
+}
+
 # Apps
 # ------------------
 

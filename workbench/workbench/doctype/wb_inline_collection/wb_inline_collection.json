@@ -1,0 +1,120 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "hash",
+ "creation": "2024-01-01 00:00:00.000000",
+ "default_view": "List",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "page",
+  "block_id",
+  "schema_json",
+  "config_json",
+  "filters_json",
+  "sorts_json",
+  "column_break_7",
+  "creation",
+  "modified",
+  "modified_by",
+  "owner"
+ ],
+ "fields": [
+  {
+   "fieldname": "page",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Page",
+   "options": "Notion Page",
+   "reqd": 1
+  },
+  {
+   "fieldname": "block_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Block ID",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "schema_json",
+   "fieldtype": "Long Text",
+   "label": "Schema JSON"
+  },
+  {
+   "fieldname": "config_json",
+   "fieldtype": "Long Text",
+   "label": "Config JSON"
+  },
+  {
+   "fieldname": "filters_json",
+   "fieldtype": "Long Text",
+   "label": "Filters JSON"
+  },
+  {
+   "fieldname": "sorts_json",
+   "fieldtype": "Long Text",
+   "label": "Sorts JSON"
+  },
+  {
+   "fieldname": "column_break_7",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "creation",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Creation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "modified",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Modified",
+   "read_only": 1
+  },
+  {
+   "fieldname": "modified_by",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Modified By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "owner",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Owner",
+   "options": "User",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2024-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Workbench",
+ "name": "WB Inline Collection",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
